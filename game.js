@@ -53,6 +53,7 @@
     drawPoints: [],
     drawActive: false,
     toolBuilt: false,
+    toolPaletteOpen: false,
     tool: {
       maxDof: 2,
       jointTs: [],
@@ -60,7 +61,7 @@
       jointAngles: [],
       jointVels: [],
       points: [],
-      hand: 1,
+      hand: 0,
       aimIndex: 0,
       targetIndex: 0,
       angle: 0,
@@ -79,9 +80,9 @@
       mode: "idle",
       modeTimer: 0,
       swingSide: 1,
+      swingReturning: false,
       charge: 0,
       chargePower: 0,
-      chargeKey: null,
       qAnchor: null,
       returnHitIds: new Set(),
       returnTrail: []
@@ -228,82 +229,103 @@
     const a = Math.atan2(player.dirY, player.dirX);
     return ((Math.round(a / (Math.PI / 4)) % 8) + 8) % 8;
   }
-  function spawnWindArc(side, charged = false) {
+  function spawnWindArc(side, strong = false) {
     const p = project(player.x, player.y, player.z + 8);
     const base = indexAngle(facingIndex());
     const dof = state.tool.jointTs.length;
     state.windArcs.push({
       x: p.x,
       y: p.y,
-      a0: base - side * (charged ? 2.7 : 1.35),
-      a1: base + side * (charged ? 0.35 : 1.05),
+      a0: strong ? base + Math.PI : base - side * 1.35,
+      a1: strong ? base : base + side * 1.05,
       radius: state.tool.segments.reduce((a, b) => a + b, 0) + 5 + dof * 3,
-      color: charged ? (dof === 2 ? palette.gold : dof === 1 ? palette.ink2 : palette.white) : "#d7fff2",
-      life: charged ? 0.42 : 0.25,
-      full: charged ? 0.42 : 0.25,
-      width: charged ? 4 + dof : 2
+      color: strong ? (dof === 2 ? palette.gold : dof === 1 ? palette.ink2 : palette.white) : "#d7fff2",
+      life: strong ? 0.42 : 0.25,
+      full: strong ? 0.42 : 0.25,
+      width: strong ? 4 + dof : 2,
+      ccw: strong
     });
-    if (charged && dof === 2) {
+    if (strong && dof === 2) {
       state.windArcs.push({
         x: p.x,
         y: p.y,
-        a0: base - side * 2.15,
-        a1: base + side * 0.72,
+        a0: base + Math.PI * 0.86,
+        a1: base + 0.14,
         radius: state.tool.segments.reduce((a, b) => a + b, 0) - 3,
         color: palette.ink2,
         life: 0.34,
         full: 0.34,
-        width: 3
+        width: 3,
+        ccw: true
       });
     }
   }
   function triggerSwing(side) {
     const tool = state.tool;
-    if (!state.toolBuilt || tool.planted || tool.mode === "charging" || tool.mode === "returning") return;
+    if (!state.toolBuilt || tool.planted || tool.mode === "returning") return;
     tool.mode = "swing";
-    tool.modeTimer = 0.24;
+    tool.modeTimer = 0.30;
     tool.swingSide = side;
+    tool.swingReturning = false;
     tool.routeSteps = 2;
     setToolTarget((facingIndex() + side * 2 + 8) % 8);
     spawnWindArc(side, false);
     tone(260 + (side > 0 ? 50 : 0), 0.1, "triangle", 0.035, 220);
   }
-  function beginCharge(keyCode) {
+  function enterReadyStance() {
     const tool = state.tool;
     if (!state.toolBuilt || tool.planted || tool.mode === "returning") return;
-    tool.mode = "charging";
-    tool.charge = 0;
-    tool.chargeKey = keyCode;
-    tool.routeSteps = 2;
+    tool.mode = "ready";
+    tool.charge = 1;
+    tool.routeSteps = 4;
     setToolTarget((facingIndex() + 4) % 8);
-    tone(110, 0.18, "sawtooth", 0.025, 65);
+    tone(110, 0.15, "sawtooth", 0.025, 45);
   }
-  function releaseCharge() {
+  function triggerStrongSwing() {
     const tool = state.tool;
-    if (tool.mode !== "charging") return;
-    tool.chargePower = clamp(tool.charge, 0.18, 1);
-    tool.mode = "chargeRelease";
-    tool.modeTimer = 0.34 + tool.jointTs.length * 0.06;
+    if (tool.mode !== "ready") return;
+    tool.chargePower = 1;
+    tool.mode = "strongSwing";
+    tool.modeTimer = 0.40 + tool.jointTs.length * 0.04;
     tool.routeSteps = 4;
     setToolTarget(facingIndex());
-    spawnWindArc(tool.swingSide || 1, true);
-    state.flash = Math.max(state.flash, 0.2 + tool.chargePower * 0.25);
-    state.shake = Math.max(state.shake, 2 + tool.chargePower * 3);
+    // A 180-degree tie must always take the visually counter-clockwise path.
+    tool.routeSign = -1;
+    spawnWindArc(-1, true);
+    state.flash = Math.max(state.flash, 0.42);
+    state.shake = Math.max(state.shake, 5);
     tone(170, 0.16, "sawtooth", 0.055, 620);
   }
-  function handleToolDirection(index, keyCode) {
+  function handleToolDirection(index) {
     if (!state.toolBuilt) return;
+    if (state.tool.mode === "swing" || state.tool.mode === "strongSwing" || state.tool.mode === "returning") return;
     const delta = (index - facingIndex() + 8) % 8;
     if (delta === 0) {
-      if (state.tool.mode === "charging") releaseCharge();
+      if (state.tool.mode === "ready") triggerStrongSwing();
       else setToolTarget(facingIndex());
     } else if (delta === 1 || delta === 2) {
       triggerSwing(1);
     } else if (delta === 6 || delta === 7) {
       triggerSwing(-1);
     } else {
-      beginCharge(keyCode);
+      enterReadyStance();
     }
+  }
+  function toggleToolPalette() {
+    if (!state.toolBuilt || state.tool.planted) return;
+    state.toolPaletteOpen = !state.toolPaletteOpen;
+    state.tool.mode = "idle";
+    state.tool.angularVelocity *= 0.2;
+    setToolTarget(facingIndex());
+    tone(state.toolPaletteOpen ? 330 : 240, 0.07, "triangle", 0.025, 80);
+  }
+  function moveToolPalette(dx, dy) {
+    const row = Math.floor(state.tool.formIndex / 3);
+    const col = state.tool.formIndex % 3;
+    const nextRow = (row + dy + 2) % 2;
+    const nextCol = (col + dx + 3) % 3;
+    state.tool.formIndex = nextRow * 3 + nextCol;
+    tone(300 + state.tool.formIndex * 38, 0.055, "triangle", 0.022, 70);
   }
   function project(x, y, z = 0) {
     return {
@@ -511,24 +533,33 @@
     const tool = state.tool;
     const arrow = arrowDirection();
     if (tool.mode === "idle" && !tool.planted) setToolTarget(facingIndex());
-    if (tool.mode === "charging") {
-      tool.charge = clamp(tool.charge + dt * 0.85, 0, 1);
-      if (Math.random() < dt * (8 + tool.charge * 18)) {
+    if (tool.mode === "ready") {
+      setToolTarget((facingIndex() + 4) % 8);
+      if (Math.random() < dt * 12) {
         const chargePose = toolPose();
         const chargeTip = chargePose[chargePose.length - 1];
-        particle(chargeTip.x, chargeTip.y, TOOL_FORMS[tool.formIndex].color, 1, 9 + tool.charge * 12, -5);
+        particle(chargeTip.x, chargeTip.y, TOOL_FORMS[tool.formIndex].color, 1, 12, -5);
       }
     }
     if (tool.mode === "swing") {
       tool.modeTimer -= dt;
-      if (tool.modeTimer < 0.12) setToolTarget(facingIndex());
-      if (tool.modeTimer <= 0) tool.mode = "idle";
-    } else if (tool.mode === "chargeRelease") {
+      if (tool.modeTimer <= 0.15 && !tool.swingReturning) {
+        tool.swingReturning = true;
+        setToolTarget(facingIndex());
+      }
+      if (tool.modeTimer <= 0) {
+        tool.mode = "idle";
+        tool.angle = indexAngle(facingIndex());
+        tool.angularVelocity = 0;
+      }
+    } else if (tool.mode === "strongSwing") {
       tool.modeTimer -= dt;
       if (tool.modeTimer <= 0) {
         tool.mode = "idle";
         tool.charge = 0;
         tool.chargePower = 0;
+        tool.angle = indexAngle(facingIndex());
+        tool.angularVelocity = 0;
       }
     } else if (tool.mode === "returning") {
       tool.modeTimer -= dt;
@@ -543,7 +574,9 @@
     if (remaining > TAU - 0.02) remaining = 0;
     const speeds = [0, 2.7, 4.0, 5.8, 7.8];
     let wantedSpeed = speeds[tool.routeSteps] || 2.7;
-    if (tool.mode === "chargeRelease") wantedSpeed = 8.8 + tool.jointTs.length * 1.8 + tool.chargePower * 2.5;
+    if (tool.mode === "swing") wantedSpeed = 14;
+    if (tool.mode === "ready") wantedSpeed = 8;
+    if (tool.mode === "strongSwing") wantedSpeed = 18 + tool.jointTs.length * 1.5;
     if (tool.mode === "returning") wantedSpeed = 10.5;
     if (remaining > 0.018) {
       const braking = clamp(remaining / 0.38, 0.12, 1);
@@ -563,9 +596,9 @@
     }
 
     for (let i = 0; i < tool.jointAngles.length; i++) {
-      const chargeWave = tool.mode === "chargeRelease" ? Math.sin((1 - tool.modeTimer / 0.46) * Math.PI * (i + 1)) * (0.35 + i * 0.18) : 0;
-      const tuck = tool.mode === "charging" ? (i % 2 ? -1 : 1) * tool.charge * 0.32 : 0;
-      const coupling = -tool.angularVelocity * (0.46 + i * 0.18) * (tool.mode === "chargeRelease" ? 1.5 : 1);
+      const chargeWave = tool.mode === "strongSwing" ? Math.sin((1 - tool.modeTimer / 0.48) * Math.PI * (i + 1)) * (0.35 + i * 0.18) : 0;
+      const tuck = tool.mode === "ready" ? (i % 2 ? -1 : 1) * 0.32 : 0;
+      const coupling = -tool.angularVelocity * (0.46 + i * 0.18) * (tool.mode === "strongSwing" ? 1.5 : 1);
       tool.jointVels[i] += (-(tool.jointAngles[i] - chargeWave - tuck) * 13 + coupling - tool.jointVels[i] * 4.8) * dt;
       tool.jointAngles[i] = clamp(tool.jointAngles[i] + tool.jointVels[i] * dt, -0.95, 0.95);
       if (Math.abs(tool.jointAngles[i]) >= 0.94) tool.jointVels[i] *= -0.3;
@@ -584,7 +617,7 @@
         if (!c.hostile || c.neutral || c.hitCooldown > 0) continue;
         const cp = project(c.x, c.y, 8);
         if (distanceToSegment(cp.x, cp.y, tool.prevTipX, tool.prevTipY, tip.x, tip.y) < 18) {
-          const power = tipSpeed * (tool.mode === "chargeRelease" ? 1.8 + tool.chargePower + tool.jointTs.length * 0.35 : 1);
+          const power = tipSpeed * (tool.mode === "strongSwing" ? 2.8 + tool.jointTs.length * 0.35 : 1);
           damageCreature(c, player.x, player.y, power);
           tool.sweepCooldown = 0.28;
           break;
@@ -1341,7 +1374,7 @@
     }
     const root = points[0];
     const end = points[points.length - 1];
-    ctx.fillStyle = tool.hand > 0 ? palette.orange : palette.purple;
+    ctx.fillStyle = palette.gold;
     ctx.fillRect(Math.round(root.x - 2), Math.round(root.y - 2), 4, 4);
     drawToolTip(end, points[points.length - 2], TOOL_FORMS[tool.formIndex]);
     if (tool.planted) {
@@ -1359,12 +1392,12 @@
       ctx.ellipse(q.x, q.y + 2, 7, 3, 0, 0, TAU);
       ctx.stroke();
     }
-    if (tool.mode === "charging") {
+    if (tool.mode === "ready") {
       ctx.strokeStyle = TOOL_FORMS[tool.formIndex].color;
-      ctx.globalAlpha = 0.45 + tool.charge * 0.4;
-      ctx.lineWidth = 1 + tool.charge * 2;
+      ctx.globalAlpha = 0.42 + Math.sin(state.time * 8) * 0.16;
+      ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.arc(root.x, root.y, 8 + tool.charge * 10, -Math.PI * 0.9, Math.PI * 0.7);
+      ctx.arc(root.x, root.y, 12 + Math.sin(state.time * 6) * 2, -Math.PI * 0.9, Math.PI * 0.7);
       ctx.stroke();
       ctx.globalAlpha = 1;
     }
@@ -1511,12 +1544,12 @@
       ctx.strokeStyle = w.color;
       ctx.lineWidth = w.width * t;
       ctx.beginPath();
-      ctx.arc(w.x, w.y, w.radius * (1 + (1 - t) * 0.16), w.a0, w.a1, w.a1 < w.a0);
+      ctx.arc(w.x, w.y, w.radius * (1 + (1 - t) * 0.16), w.a0, w.a1, w.ccw ?? (w.a1 < w.a0));
       ctx.stroke();
       ctx.globalAlpha = t * 0.42;
       ctx.lineWidth = Math.max(1, w.width - 2);
       ctx.beginPath();
-      ctx.arc(w.x, w.y, w.radius + 5, w.a0 + 0.18, w.a1 - 0.12, w.a1 < w.a0);
+      ctx.arc(w.x, w.y, w.radius + 5, w.a0 + 0.18, w.a1 - 0.12, w.ccw ?? (w.a1 < w.a0));
       ctx.stroke();
       ctx.restore();
     }
@@ -1631,14 +1664,11 @@
       ctx.font = "bold 8px monospace";
       ctx.textAlign = "center";
       ctx.fillText("2", 44, H - 12);
-      ctx.fillStyle = state.tool.hand < 0 ? palette.purple : "#63747a";
-      ctx.fillRect(51, H - 25, 8, 10);
-      ctx.fillStyle = state.tool.hand > 0 ? palette.orange : "#63747a";
-      ctx.fillRect(63, H - 25, 8, 10);
+      ctx.fillStyle = "#263d43";
+      ctx.fillRect(51, H - 25, 21, 10);
       ctx.fillStyle = palette.white;
-      ctx.font = "7px monospace";
-      ctx.fillText("[", 55, H - 16);
-      ctx.fillText("]", 67, H - 16);
+      ctx.font = "bold 6px monospace";
+      ctx.fillText("TAB", 61, H - 18);
     }
 
     const phase = (state.time % 80) / 80;
@@ -1663,6 +1693,39 @@
     ctx.font = "bold 8px monospace";
     ctx.textAlign = "left";
     ctx.fillText(`${temperature}°`, W / 2 - 7, 17);
+    ctx.restore();
+  }
+
+  function drawToolPalette() {
+    if (!state.toolPaletteOpen || !state.toolBuilt) return;
+    ctx.save();
+    ctx.fillStyle = "rgba(7,16,22,.58)";
+    ctx.fillRect(0, 0, W, H);
+    const panel = { x: W / 2 - 67, y: H / 2 - 48, w: 134, h: 96 };
+    ctx.fillStyle = "#102b31";
+    ctx.fillRect(panel.x, panel.y, panel.w, panel.h);
+    ctx.strokeStyle = palette.ink2;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(panel.x, panel.y, panel.w, panel.h);
+    for (let i = 0; i < TOOL_FORMS.length; i++) {
+      const col = i % 3;
+      const row = Math.floor(i / 3);
+      const x = panel.x + 14 + col * 42;
+      const y = panel.y + 14 + row * 39;
+      ctx.fillStyle = i === state.tool.formIndex ? "#315f65" : "#1a3a40";
+      ctx.fillRect(x, y, 34, 31);
+      if (i === state.tool.formIndex) {
+        ctx.strokeStyle = palette.gold;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x - 2, y - 2, 38, 35);
+      }
+      pixelLine(x + 7, y + 16, x + 20, y + 16, "#a9ddd0", 3);
+      drawToolTip({ x: x + 26, y: y + 16 }, { x: x + 19, y: y + 16 }, TOOL_FORMS[i]);
+    }
+    ctx.fillStyle = palette.white;
+    ctx.font = "bold 7px monospace";
+    ctx.textAlign = "center";
+    ctx.fillText("TAB", W / 2, panel.y - 7);
     ctx.restore();
   }
 
@@ -1762,7 +1825,7 @@
     // Gripper capacity: the item can host up to two joints, including zero.
     ctx.fillStyle = "#243b43";
     ctx.fillRect(274, 34, 38, 22);
-    ctx.fillStyle = state.tool.hand > 0 ? palette.orange : palette.purple;
+    ctx.fillStyle = palette.gold;
     ctx.fillRect(280, 42, 10, 7);
     ctx.fillRect(283, 38, 2, 5);
     ctx.fillRect(287, 37, 2, 6);
@@ -1844,6 +1907,7 @@
     }
 
     drawHUD();
+    drawToolPalette();
     if (state.flash > 0) {
       ctx.fillStyle = `rgba(238,252,242,${state.flash * 0.35})`;
       ctx.fillRect(0, 0, W, H);
@@ -1888,6 +1952,24 @@
       if (event.code === "Space" || event.code.startsWith("Arrow")) event.preventDefault();
       return;
     }
+    if (event.code === "Tab") {
+      event.preventDefault();
+      if (!event.repeat) toggleToolPalette();
+      return;
+    }
+    if (state.toolPaletteOpen) {
+      if (event.code.startsWith("Arrow")) {
+        event.preventDefault();
+        if (!event.repeat) {
+          if (event.code === "ArrowLeft") moveToolPalette(-1, 0);
+          if (event.code === "ArrowRight") moveToolPalette(1, 0);
+          if (event.code === "ArrowUp") moveToolPalette(0, -1);
+          if (event.code === "ArrowDown") moveToolPalette(0, 1);
+        }
+      }
+      if ((event.code === "Enter" || event.code === "Escape") && !event.repeat) toggleToolPalette();
+      return;
+    }
     if (!event.repeat) {
       if (event.code === "KeyA") player.vx -= 15;
       if (event.code === "KeyD") player.vx += 15;
@@ -1907,19 +1989,11 @@
             player.vz = Math.max(player.vz, 74);
           }
         } else if (!event.repeat) {
-          handleToolDirection(direction, event.code);
+          handleToolDirection(direction);
         }
       }
     }
     if (event.code.startsWith("Arrow")) event.preventDefault();
-    if (event.code === "BracketLeft") {
-      state.tool.hand = -1;
-      tone(240, 0.05, "square", 0.02, 50);
-    }
-    if (event.code === "BracketRight") {
-      state.tool.hand = 1;
-      tone(310, 0.05, "square", 0.02, 50);
-    }
     if (event.code === "Space") {
       event.preventDefault();
       if (!event.repeat) {
@@ -1932,7 +2006,6 @@
   });
   window.addEventListener("keyup", event => {
     state.keys[event.code] = false;
-    if (event.code === state.tool.chargeKey && state.tool.mode === "charging") releaseCharge();
     if (event.code === "Space") releaseTool();
   });
 
