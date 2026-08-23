@@ -1,0 +1,68 @@
+:root {
+  color-scheme: dark;
+  background: #b9ecdd;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 35%, #fff1a8 0, #89d9c4 36%, #3d8191 72%, #203f58 100%);
+}
+
+body {
+  display: grid;
+  place-items: center;
+  padding: 12px;
+}
+
+.game-shell {
+  position: relative;
+  width: min(100vw - 24px, calc((100vh - 24px) * 16 / 9), 1152px);
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 2px solid #d9f3c6;
+  border-radius: 8px;
+  background: #72b879;
+  box-shadow: 0 0 0 2px #315b63, 0 20px 60px rgb(15 50 62 / 38%), 0 0 90px rgb(255 229 126 / 30%);
+}
+
+.game-shell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(to bottom, transparent 0, transparent 3px, rgb(20 65 68 / 4%) 3px, rgb(20 65 68 / 4%) 4px);
+  mix-blend-mode: multiply;
+}
+
+#game {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  touch-action: none;
+}
+
+#game:focus {
+  outline: none;
+}
+
+@media (max-width: 640px) {
+  body { padding: 0; }
+  .game-shell {
+    width: 100vw;
+    max-height: 100vh;
+    border: 0;
+    border-radius: 0;
+  }
+}
