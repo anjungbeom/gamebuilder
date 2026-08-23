@@ -1,20 +1,4 @@
 # Game Builder
-
-[OpenAI Game Builders Seoul](https://openaigame2026.com/#apply)의 Track 1 출품작을 만든다.
-
-## 회의 기록 규칙
-
-- 대화가 `[회의]`로 시작하면 논의 내용을 이 문서에 정리한다.
-- 확정된 내용과 제안·미결 사항을 구분한다.
-- 새 회의는 날짜별로 아래에 누적한다.
-
-## 해커톤 핵심 조건
-
-- 브라우저에서 설치 없이 바로 실행되는 웹 게임이어야 한다.
-- 플레이 링크는 심사 기간 동안 승인 절차 없이 접근 가능해야 한다.
-- 평가 항목은 Playability, Originality, Codex Collaboration, Release Potential, Presentation이다.
-- 3분 이내 실제 플레이 영상과 Codex 활용 과정 설명은 선택 제출이며 가산점 대상이다.
-
 ## 게임 콘셉트
 
 ### 확정
