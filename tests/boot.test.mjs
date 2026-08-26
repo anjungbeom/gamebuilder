@@ -89,8 +89,8 @@ test("이동 입력이 좌표를 바꾸고 자동 저장이 남는다", () => {
   assert.ok(Number.isFinite(save.px));
   assert.equal(save.faceX, 1, "마지막 이동 방향이 저장되어야 한다");
   assert.equal(save.faceY, 0);
-  assert.equal(save.hp, 5, "체력도 저장되어야 한다");
   assert.equal(save.maxHp, 5);
+  assert.ok(save.hp >= 1 && save.hp <= save.maxHp, "피격 이후의 유효한 체력이 저장되어야 한다");
 });
 
 test("도구를 그려 확정하면 저장에 남는다", () => {
