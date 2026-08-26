@@ -199,6 +199,23 @@ export function drawCreature(ctx, creature, sx, sy, time) {
   const dark = `hsl(${g.hue.toFixed(0)},${g.sat.toFixed(0)}%,${Math.max(14, g.light - 20).toFixed(0)}%)`;
   const lightC = `hsl(${g.hue.toFixed(0)},${g.sat.toFixed(0)}%,${Math.min(88, g.light + 18).toFixed(0)}%)`;
 
+  // 행동을 보기 전에도 적대 여부가 읽히는 고정 표식.
+  const signal = creature.hostile ? "#ff615d" : "#7ee0c0";
+  ctx.strokeStyle = signal;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(sx, sy + 1, g.bodyRadius * 2.2 + 3, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.fillStyle = signal;
+  if (creature.hostile) {
+    ctx.fillRect(sx - 1, sy - g.bodyRadius - 10, 2, 5);
+    ctx.fillRect(sx - 1, sy - g.bodyRadius - 3, 2, 2);
+  } else {
+    ctx.fillRect(sx - 3, sy - g.bodyRadius - 8, 2, 2);
+    ctx.fillRect(sx + 2, sy - g.bodyRadius - 8, 2, 2);
+    ctx.fillRect(sx - 1, sy - g.bodyRadius - 6, 3, 3);
+  }
+
   ctx.fillStyle = "rgba(0,0,0,0.22)";
   ctx.fillRect(sx - g.bodyRadius * 1.6, sy + g.bodyRadius, g.bodyRadius * 3.2, 2);
 
@@ -245,10 +262,21 @@ export function drawCreature(ctx, creature, sx, sy, time) {
   }
 }
 
-export function drawPlayer(ctx, sx, sy, facing, walking, time, afloat) {
+export function drawPlayer(ctx, sx, sy, faceX, faceY, walking, time, afloat, running = false, shoes = null, hurt = 0) {
   const bob = walking ? Math.round(Math.sin(time / 90) * 1) : 0;
+  const stride = walking ? Math.round(Math.sin(time / 70)) : 0;
   const x = Math.round(sx);
   const y = Math.round(sy) + bob;
+  const side = faceX !== 0;
+  const front = faceY > 0;
+  const back = faceY < 0;
+  const dir = faceX < 0 ? -1 : 1;
+
+  if (running) {
+    ctx.fillStyle = "rgba(218,244,255,0.48)";
+    ctx.fillRect(x - faceX * 8 - 2, y - faceY * 5 + 1, 4, 1);
+    ctx.fillRect(x - faceX * 12, y - faceY * 7 + 4, 3, 1);
+  }
 
   if (afloat) {
     ctx.fillStyle = "#8a5a2f";
@@ -260,46 +288,85 @@ export function drawPlayer(ctx, sx, sy, facing, walking, time, afloat) {
     ctx.fillRect(x - 4, y + 6, 9, 2);
   }
 
-  ctx.fillStyle = "#2f4a6b";        // 다리
-  ctx.fillRect(x - 3, y + 2, 3, 5);
-  ctx.fillRect(x + 1, y + 2, 3, 5);
-  ctx.fillStyle = "#6b5037";        // 기존 실루엣 뒤에 덧대는 개척 가방
-  const packX = facing >= 0 ? x - 6 : x + 3;
-  ctx.fillRect(packX, y - 3, 4, 6);
+  ctx.fillStyle = shoes?.color ?? "#2f4a6b";
+  if (faceY !== 0 && !faceX) {
+    ctx.fillRect(x - 3 + stride, y + 2, 3, 5);
+    ctx.fillRect(x + 1 - stride, y + 2, 3, 5);
+  } else {
+    ctx.fillRect(x - 3 + stride * dir, y + 2, 3, 5);
+    ctx.fillRect(x + 1 - stride * dir, y + 2, 3, 5);
+  }
+
+  // 가방 위치가 뒤쪽을 알려 줘서 작은 실루엣에서도 방향이 먼저 읽힌다.
+  ctx.fillStyle = "#6b5037";
+  const packX = side ? (dir > 0 ? x - 6 : x + 3) : x - 4;
+  const packY = back ? y - 4 : y - 2;
+  ctx.fillRect(packX, packY, side ? 4 : 9, back ? 7 : 5);
   ctx.fillStyle = "#b58a52";
-  ctx.fillRect(packX + 1, y - 2, 2, 1);
-  ctx.fillStyle = "#d9584a";        // 외투
+  ctx.fillRect(packX + 1, packY + 1, side ? 2 : 7, 1);
+  ctx.fillStyle = hurt > 0.18 ? "#ff9a84" : "#d9584a";
   ctx.fillRect(x - 4, y - 4, 9, 7);
   ctx.fillStyle = "#f0705e";
-  ctx.fillRect(x - 3, y - 3, 4, 4);
-  ctx.fillStyle = "#f2c8a0";        // 머리
+  if (!back) ctx.fillRect(x - 3, y - 3, 4, 4);
+  if (back) {
+    ctx.fillStyle = "#795b3e";
+    ctx.fillRect(x - 3, y - 2, 7, 4);
+    ctx.fillStyle = "#c39759";
+    ctx.fillRect(x - 2, y - 1, 5, 1);
+  }
+  ctx.fillStyle = "#f2c8a0";
   ctx.fillRect(x - 3, y - 10, 7, 6);
-  ctx.fillStyle = "#3a2a20";        // 머리카락
+  ctx.fillStyle = "#3a2a20";
   ctx.fillRect(x - 4, y - 12, 9, 3);
-  ctx.fillStyle = "#101418";        // 눈
-  const ex = facing >= 0 ? x + 1 : x - 2;
-  ctx.fillRect(ex, y - 8, 2, 2);
-  ctx.fillStyle = "#ffd166";        // 맥점의 색을 닮은 짧은 길잡이 스카프
-  const scarfX = facing >= 0 ? x - 6 : x + 5;
-  ctx.fillRect(scarfX, y - 4, 3, 2);
-  ctx.fillRect(scarfX + (facing >= 0 ? -2 : 2), y - 3, 3, 1);
+  if (back) {
+    ctx.fillRect(x - 3, y - 10, 7, 4);
+  } else {
+    ctx.fillStyle = "#101418";
+    if (!side) {
+      ctx.fillRect(x - 2, y - 8, 1, 2);
+      ctx.fillRect(x + 2, y - 8, 1, 2);
+    } else {
+      ctx.fillRect(x + dir * 1 - (dir < 0 ? 1 : 0), y - 8, 2, 2);
+    }
+  }
+
+  ctx.fillStyle = "#ffd166";
+  if (side) {
+    const scarfX = dir > 0 ? x - 6 : x + 5;
+    ctx.fillRect(scarfX, y - 4, 3, 2);
+    ctx.fillRect(scarfX - dir * 2, y - 3, 3, 1);
+  } else {
+    ctx.fillRect(x - 4, y - 5, 9, 1);
+    ctx.fillRect(x + (front ? 3 : -5), y - 4, 3, 2);
+  }
 }
 
 /**
  * 플레이어가 그린 도구를 손에 들려 준다.
  * 게임 안의 모든 도구는 이 획들이 전부다.
  */
-export function drawHeldTool(ctx, tool, sx, sy, facing, swing) {
+export function drawHeldTool(ctx, tool, sx, sy, faceX, faceY, swing) {
   if (!tool) return;
-  const dir = facing >= 0 ? 1 : -1;
-  const angle = (-0.5 + swing * 1.9) * dir;
-  const originX = Math.round(sx) + dir * 4;
-  const originY = Math.round(sy) - 1;
+  const fx = faceX || (faceY === 0 ? 1 : 0);
+  const fy = faceY || 0;
+  const base = Math.atan2(fy, fx);
+  const angle = base - 0.52 + swing * 2.15;
+  const originX = Math.round(sx) + fx * 4;
+  const originY = Math.round(sy) - 1 + fy * 2;
+
+  if (swing > 0.12) {
+    ctx.save();
+    ctx.strokeStyle = `rgba(218,244,255,${Math.min(0.65, swing * 0.75).toFixed(3)})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(originX, originY, 13, base - 0.7, base + swing * 2.1);
+    ctx.stroke();
+    ctx.restore();
+  }
 
   ctx.save();
   ctx.translate(originX, originY);
   ctx.rotate(angle);
-  ctx.scale(dir, 1);
 
   ctx.strokeStyle = "#20242c";
   ctx.lineWidth = 2.4;
@@ -325,10 +392,15 @@ function strokePath(ctx, strokes) {
 }
 
 /** 밤낮 없이, 가장자리만 살짝 어둡게 해서 화면에 초점을 준다. */
-export function drawVignette(ctx, w, h) {
+export function drawVignette(ctx, w, h, hurt = 0) {
   const g = ctx.createRadialGradient(w / 2, h / 2, h * 0.35, w / 2, h / 2, h * 0.95);
   g.addColorStop(0, "rgba(0,0,0,0)");
   g.addColorStop(1, "rgba(6,10,18,0.42)");
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, w, h);
+  if (hurt > 0) {
+    const a = Math.min(0.22, hurt * 0.2);
+    ctx.fillStyle = `rgba(255,73,63,${a.toFixed(3)})`;
+    ctx.fillRect(0, 0, w, h);
+  }
 }

@@ -24,13 +24,13 @@ export const OBSTACLE = {
 
 /** 장애물마다 요구하는 능력치와 문턱값. 도구가 이 값을 넘겨야 치운다. */
 export const OBSTACLE_RULE = {
-  [OBSTACLE.BOULDER]: { stat: "edge", threshold: 0.42, label: "균열 바위", need: "쐐기력" },
-  [OBSTACLE.THICKET]: { stat: "reach", threshold: 0.40, label: "높은 수풀", need: "도달력" },
-  [OBSTACLE.BRAMBLE]: { stat: "grip", threshold: 0.34, label: "엉킨 덩굴", need: "결속력" }
+  [OBSTACLE.BOULDER]: { stat: "edge", threshold: 0.42, label: "균열 바위", need: "바위 성능" },
+  [OBSTACLE.THICKET]: { stat: "reach", threshold: 0.40, label: "높은 수풀", need: "거리" },
+  [OBSTACLE.BRAMBLE]: { stat: "grip", threshold: 0.34, label: "엉킨 덩굴", need: "포획" }
 };
 
 /** 물은 부력으로만 건넌다. */
-export const WATER_RULE = { stat: "buoy", threshold: 0.30, label: "물", need: "부력" };
+export const WATER_RULE = { stat: "buoy", threshold: 0.30, label: "물", need: "물길" };
 
 const BIOME_SOLID = {
   [BIOME.DEEP]: true,

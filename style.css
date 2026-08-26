@@ -138,6 +138,36 @@ html, body {
 #progress b { display: block; font-size: 1.35em; line-height: 1.1; }
 #progress span { color: var(--dim); font-size: 0.82em; }
 
+#vitals {
+  left: 2.2%;
+  bottom: 3.2%;
+  min-width: 18%;
+}
+.hearts { display: flex; gap: 2px; line-height: 1; }
+.heart { font-style: normal; font-size: 1.15em; color: #ff786c; text-shadow: 0 0 7px rgba(255,120,108,.35); }
+.heart.empty { color: rgba(255,255,255,.16); text-shadow: none; }
+.rank-line { display: flex; justify-content: space-between; gap: 12px; margin-top: 5px; color: var(--dim); font-size: .82em; }
+.rank-line b { color: var(--grip); }
+.shoe-line { display: flex; justify-content: space-between; gap: 10px; margin-top: 3px; color: var(--dim); font-size: .78em; }
+.shoe-line b { color: var(--reach); font-weight: 650; }
+.palette-key { margin-top: 5px; padding-top: 4px; border-top: 1px solid var(--stroke); color: var(--dim); font-size: .7em; }
+
+.dura-meter {
+  height: 4px;
+  margin: -1px 0 5px;
+  border-radius: 99px;
+  overflow: hidden;
+  background: rgba(255,255,255,.1);
+}
+.dura-meter i { display: block; height: 100%; width: 100%; background: linear-gradient(90deg, #7ee0c0, #ffd166); transition: width 140ms ease; }
+.dura-meter i.low { background: var(--edge); }
+
+#map-panel { right: 2.2%; top: 14%; width: 112px; padding: 6px; }
+.map-head { display: flex; justify-content: space-between; gap: 5px; margin-bottom: 4px; color: var(--dim); font-size: .75em; }
+.map-head b { color: var(--ink); font-variant-numeric: tabular-nums; }
+#minimap { display: block; width: 100%; height: auto; image-rendering: pixelated; border: 1px solid rgba(230,240,255,.2); background: #162033; }
+.goal-text { margin-top: 5px; color: #ffe59b; font-size: .74em; line-height: 1.35; }
+
 .hint {
   position: absolute;
   left: 50%;
@@ -218,6 +248,7 @@ html, body {
   font-size: clamp(8px, 1.25cqw, 12px);
 }
 .draw-legend .k { color: var(--ink); font-style: normal; font-weight: 700; }
+.draw-budget { margin-top: 6px; color: #ffe59b; font-size: clamp(8px, 1.15cqw, 11px); }
 .draw-keys { display: flex; justify-content: center; gap: 8px; margin-top: 8px; }
 .draw-keys button {
   background: rgba(255, 255, 255, 0.08);
@@ -245,6 +276,12 @@ kbd {
   transform: translateY(-50%);
   min-width: 24%;
   border-color: rgba(127, 208, 255, 0.45);
+}
+
+@media (max-width: 620px) {
+  #map-panel { width: 96px; top: 17%; }
+  #vitals { min-width: 24%; }
+  .goal-text { font-size: .68em; }
 }
 
 /* ---- 오버레이 ---- */
@@ -326,3 +363,24 @@ kbd {
 .dex-entry .nm { font-weight: 700; }
 .dex-entry .bi { color: var(--dim); font-size: 0.85em; }
 .dex-empty { color: var(--dim); margin-top: 14px; font-size: clamp(9px, 1.4cqw, 14px); }
+
+.palette-wrap { width: min(94%, 760px); }
+.palette-summary { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; margin: 11px 0; }
+.palette-summary span { padding: 5px 9px; border: 1px solid var(--stroke); border-radius: 99px; color: var(--dim); font-size: clamp(8px,1.2cqw,12px); }
+.palette-summary b { color: var(--ink); }
+.gear-sections { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; text-align: left; }
+.gear-section { padding: 10px; border: 1px solid var(--stroke); border-radius: 6px; background: rgba(255,255,255,.035); }
+.gear-section h2 { display: flex; justify-content: space-between; align-items: center; font-size: clamp(10px,1.5cqw,15px); }
+.gear-section h2 span { color: var(--dim); font-size: .75em; font-weight: 500; }
+.gear-list { display: grid; gap: 5px; margin-top: 7px; }
+.gear-card { display: grid; grid-template-columns: 1fr auto; gap: 3px 7px; padding: 6px 7px; border: 1px solid rgba(150,180,220,.15); border-radius: 4px; background: rgba(0,0,0,.12); }
+.gear-card.equipped { border-color: rgba(255,209,102,.55); background: rgba(255,209,102,.07); }
+.gear-card .gear-name { font-weight: 700; font-size: clamp(8px,1.2cqw,12px); }
+.gear-card .gear-stat { grid-column: 1; color: var(--dim); font-size: clamp(7px,1cqw,10px); }
+.gear-actions { grid-column: 2; grid-row: 1 / span 2; display: flex; gap: 4px; align-items: center; }
+#overlay .gear-actions button, #overlay .gear-section > button { margin: 0; padding: 4px 7px; font-size: clamp(7px,1.05cqw,10px); }
+#overlay .gear-actions .drop { color: #ffb2a8; background: transparent; box-shadow: inset 0 0 0 1px rgba(255,123,107,.25); }
+.gear-empty { margin-top: 8px; color: var(--dim); font-size: clamp(8px,1.1cqw,11px); }
+.milestone-strip { margin-top: 10px; color: var(--dim); font-size: clamp(8px,1.15cqw,11px); }
+.milestone-strip b { color: #ffe59b; }
+@media (max-width: 620px) { .gear-sections { grid-template-columns: 1fr; } }

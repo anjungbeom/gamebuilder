@@ -16,16 +16,32 @@
     <!-- 도구 패널: 평소엔 든 도구를, 그리는 중엔 실시간 분석을 보여준다 -->
     <div id="tool-panel" class="panel" hidden>
       <div class="tool-head">
-        <span id="tool-name">맨손</span>
+        <span id="tool-name">도구 없음</span>
         <span id="tool-dura" class="dura"></span>
       </div>
+      <div id="dura-meter" class="dura-meter" hidden><i id="dura-fill"></i></div>
       <div id="bars"></div>
+    </div>
+
+    <div id="vitals" class="panel" hidden aria-label="탐험가 상태">
+      <div id="hearts" class="hearts"></div>
+      <div class="rank-line"><span>개척 공명</span><b id="p-resonance">0</b></div>
+      <div class="shoe-line"><span>신발</span><b id="shoe-name">기본 장화</b></div>
+      <div class="palette-key"><kbd>Tab</kbd> 장비·수집 팔레트</div>
     </div>
 
     <div id="progress" class="panel" hidden>
       <div><b id="p-marks">0</b><span>/5 맥점</span></div>
       <div><b id="p-catalog">0</b><span>종 기록</span></div>
       <div><b id="p-depth">0</b><span>최장 거리</span></div>
+      <div><b id="p-captures">0</b><span>위협 포획</span></div>
+      <div><b id="p-ink">10</b><span>남은 획</span></div>
+    </div>
+
+    <div id="map-panel" class="panel" hidden>
+      <div class="map-head"><span>현장 나침반</span><b id="map-coord">0 · 0</b></div>
+      <canvas id="minimap" width="88" height="64" aria-label="주변 지형 지도"></canvas>
+      <div id="goal-text" class="goal-text">가장 가까운 맥점을 찾는 중</div>
     </div>
 
     <div id="hint" class="hint" hidden></div>
@@ -34,14 +50,15 @@
     <!-- 그리기 화면 -->
     <div id="draw-layer" hidden>
       <div id="draw-box">
-        <div class="draw-title"><span class="draw-sigil" aria-hidden="true"></span>개척 도구 설계</div>
+        <div class="draw-title"><span class="draw-sigil" aria-hidden="true"></span><span id="draw-title-text">손도구 설계</span></div>
         <canvas id="pad" width="300" height="220"></canvas>
-        <div class="draw-legend">
-          <span><i class="k">길게</i> 도달력</span>
-          <span><i class="k">뾰족하게</i> 쐐기력</span>
-          <span><i class="k">닫아서</i> 부력</span>
-          <span><i class="k">여러 획</i> 결속력</span>
+        <div id="draw-legend" class="draw-legend">
+          <span><i class="k">뾰족하게</i> 바위</span>
+          <span><i class="k">길게</i> 거리</span>
+          <span><i class="k">닫아서</i> 물길</span>
+          <span><i class="k">여러 획</i> 포획</span>
         </div>
+        <div id="draw-budget" class="draw-budget">획을 그릴 때마다 수집한 획 조각 1개를 사용한다</div>
         <div class="draw-keys">
           <button data-act="confirm">제작 <kbd>Enter</kbd></button>
           <button data-act="clear">다시 그리기 <kbd>Backspace</kbd></button>

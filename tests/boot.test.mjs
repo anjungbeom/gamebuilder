@@ -87,6 +87,10 @@ test("이동 입력이 좌표를 바꾸고 자동 저장이 남는다", () => {
   const save = JSON.parse(raw);
   assert.equal(save.v, 2);
   assert.ok(Number.isFinite(save.px));
+  assert.equal(save.faceX, 1, "마지막 이동 방향이 저장되어야 한다");
+  assert.equal(save.faceY, 0);
+  assert.equal(save.hp, 5, "체력도 저장되어야 한다");
+  assert.equal(save.maxHp, 5);
 });
 
 test("도구를 그려 확정하면 저장에 남는다", () => {
@@ -114,6 +118,51 @@ test("도구를 그려 확정하면 저장에 남는다", () => {
   assert.ok(save.tool.stats.reach > 0.3, `reach=${save.tool.stats.reach}`);
   assert.ok(save.tool.durability > 0);
   assert.ok(save.tool.strokes.length >= 1);
+  assert.equal(save.gear.hand.length, 1, "제작한 손도구가 장비 팔레트에 남아야 한다");
+  assert.equal(save.ink, 9, "한 획짜리 장비는 획 조각 하나를 사용한다");
+});
+
+test("Tab 팔레트에서 신발을 그려 장착한다", () => {
+  const down = winHandlers.get("keydown");
+  down(key("Tab"));
+  assert.match(getEl("overlay").innerHTML, /개척 팔레트/);
+  assert.match(getEl("overlay").innerHTML, /신발 그리기/);
+
+  const click = getEl("overlay")._handlers.get("click");
+  const drawBtn = makeEl();
+  drawBtn.dataset.act = "draw-gear";
+  drawBtn.dataset.slot = "shoes";
+  click({ target: { closest: () => drawBtn } });
+
+  const pad = getEl("pad");
+  pad._handlers.get("pointerdown")(pointer(30, 160));
+  for (let i = 1; i <= 18; i++) pad._handlers.get("pointermove")(pointer(30 + i * 11, 160));
+  pad._handlers.get("pointerup")({});
+  down(key("Enter"));
+
+  const save = JSON.parse(store.get("drawn-frontier-v2"));
+  assert.equal(save.gear.shoes.length, 1);
+  assert.equal(save.equipped.shoes, save.gear.shoes[0].id);
+  assert.ok(save.gear.shoes[0].shoeStats.speed > 0.4);
+  assert.equal(save.ink, 8);
+});
+
+test("Shift 달리기는 장거리 이동하며 장착한 신발을 마모시킨다", () => {
+  const down = winHandlers.get("keydown");
+  const up = winHandlers.get("keyup");
+  const before = JSON.parse(store.get("drawn-frontier-v2"));
+  const startDurability = before.gear.shoes[0].durability;
+
+  down(key("ShiftLeft"));
+  down(key("KeyA"));
+  let t = 6000;
+  for (let i = 0; i < 220; i++) { frameCb(t); t += 16; }
+  up(key("KeyA"));
+  up(key("ShiftLeft"));
+
+  const after = JSON.parse(store.get("drawn-frontier-v2"));
+  assert.ok(after.px < before.px, "달리면 왼쪽으로 실제 이동해야 한다");
+  assert.ok(after.gear.shoes[0].durability < startDurability, "장거리 질주는 신발 수명을 사용해야 한다");
 });
 
 test("사용/도감/취소 키가 예외 없이 처리된다", () => {
