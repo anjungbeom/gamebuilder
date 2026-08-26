@@ -1,68 +1,328 @@
 :root {
-  color-scheme: dark;
-  background: #b9ecdd;
-  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  --ink: #eaf2ff;
+  --dim: #93a3bb;
+  --edge: #ff7b6b;
+  --reach: #7fd0ff;
+  --buoy: #7ee0c0;
+  --grip: #ffd166;
+  --panel: rgba(10, 17, 28, 0.82);
+  --stroke: rgba(150, 180, 220, 0.22);
 }
 
-* {
-  box-sizing: border-box;
-}
+* { box-sizing: border-box; margin: 0; padding: 0; }
 
-html,
-body {
-  width: 100%;
+/* display를 지정한 요소에서도 hidden 속성이 이기게 한다 */
+[hidden] { display: none !important; }
+
+html, body {
   height: 100%;
-  margin: 0;
+  background: #070b12;
+  color: var(--ink);
+  font-family: "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
   overflow: hidden;
-  background: radial-gradient(circle at 50% 35%, #fff1a8 0, #89d9c4 36%, #3d8191 72%, #203f58 100%);
+  -webkit-text-size-adjust: 100%;
 }
 
-body {
+#frame {
+  height: 100%;
   display: grid;
   place-items: center;
+  background:
+    radial-gradient(ellipse at 50% 30%, #17263c 0%, #0a1018 60%, #070b12 100%);
   padding: 12px;
 }
 
-.game-shell {
+/* 캔버스는 정수배로 키워 도트가 뭉개지지 않게 한다 */
+#stage {
   position: relative;
-  width: min(100vw - 24px, calc((100vh - 24px) * 16 / 9), 1152px);
+  width: min(96vw, calc(96vh * 16 / 9));
   aspect-ratio: 16 / 9;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--stroke);
+  border-radius: 6px;
   overflow: hidden;
-  border: 2px solid #d9f3c6;
-  border-radius: 8px;
-  background: #72b879;
-  box-shadow: 0 0 0 2px #315b63, 0 20px 60px rgb(15 50 62 / 38%), 0 0 90px rgb(255 229 126 / 30%);
 }
 
-.game-shell::after {
+/* 기존 화면 위에만 얹는 개척 나침반 프레임. 캔버스 에셋은 건드리지 않는다. */
+#stage::before {
   content: "";
   position: absolute;
-  inset: 0;
+  inset: 5px;
+  z-index: 4;
   pointer-events: none;
-  background: repeating-linear-gradient(to bottom, transparent 0, transparent 3px, rgb(20 65 68 / 4%) 3px, rgb(20 65 68 / 4%) 4px);
-  mix-blend-mode: multiply;
+  border: 1px solid rgba(255, 209, 102, 0.13);
+  clip-path: polygon(0 0, 18px 0, 18px 1px, calc(100% - 18px) 1px, calc(100% - 18px) 0, 100% 0, 100% 18px, calc(100% - 1px) 18px, calc(100% - 1px) calc(100% - 18px), 100% calc(100% - 18px), 100% 100%, calc(100% - 18px) 100%, calc(100% - 18px) calc(100% - 1px), 18px calc(100% - 1px), 18px 100%, 0 100%, 0 calc(100% - 18px), 1px calc(100% - 18px), 1px 18px, 0 18px);
 }
 
 #game {
-  display: block;
   width: 100%;
   height: 100%;
-  cursor: crosshair;
+  display: block;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
   touch-action: none;
 }
 
-#game:focus {
-  outline: none;
+/* ---- 패널 ---- */
+.panel {
+  position: absolute;
+  background: var(--panel);
+  border: 1px solid var(--stroke);
+  border-radius: 5px;
+  padding: 7px 9px;
+  font-size: clamp(9px, 1.35cqw, 13px);
+  backdrop-filter: blur(3px);
+  pointer-events: none;
 }
 
-@media (max-width: 640px) {
-  body { padding: 0; }
-  .game-shell {
-    width: 100vw;
-    max-height: 100vh;
-    border: 0;
-    border-radius: 0;
-  }
+#stage { container-type: inline-size; }
+
+#tool-panel { left: 2.2%; top: 3.2%; min-width: 27%; }
+
+.tool-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: baseline;
+  margin-bottom: 5px;
 }
+#tool-name { font-weight: 700; letter-spacing: -0.01em; }
+.dura { color: var(--dim); font-variant-numeric: tabular-nums; font-size: 0.85em; }
+.dura.low { color: var(--edge); }
+
+.bar-row {
+  display: grid;
+  grid-template-columns: 3.6em 1fr 2.1em;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+}
+.bar-row .lbl { color: var(--dim); font-size: 0.86em; }
+.bar-row .val {
+  color: var(--dim);
+  font-size: 0.8em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.track {
+  position: relative;
+  height: 0.62em;
+  min-height: 5px;
+  background: rgba(255, 255, 255, 0.09);
+  border-radius: 99px;
+  overflow: hidden;
+}
+.fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 99px;
+  transition: width 90ms linear;
+}
+/* 문턱값 눈금 — 이 선을 넘겨야 장애물이 치워진다 */
+.tick {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  width: 2px;
+  background: rgba(255, 255, 255, 0.75);
+  border-radius: 1px;
+}
+.bar-row.met .val { color: var(--ink); }
+
+#progress {
+  right: 2.2%;
+  top: 3.2%;
+  display: flex;
+  gap: 11px;
+  text-align: center;
+}
+#progress b { display: block; font-size: 1.35em; line-height: 1.1; }
+#progress span { color: var(--dim); font-size: 0.82em; }
+
+.hint {
+  position: absolute;
+  left: 50%;
+  bottom: 5%;
+  transform: translateX(-50%);
+  background: var(--panel);
+  border: 1px solid var(--stroke);
+  border-radius: 99px;
+  padding: 5px 14px;
+  font-size: clamp(9px, 1.35cqw, 13px);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.hint b { color: var(--grip); }
+
+.toast {
+  position: absolute;
+  left: 50%;
+  top: 16%;
+  transform: translateX(-50%);
+  background: rgba(10, 17, 28, 0.92);
+  border: 1px solid var(--stroke);
+  border-radius: 5px;
+  padding: 6px 14px;
+  font-size: clamp(9px, 1.45cqw, 14px);
+  white-space: nowrap;
+  pointer-events: none;
+  animation: pop 180ms ease-out;
+}
+.toast.good { border-color: rgba(126, 224, 192, 0.6); color: #b6f5df; }
+.toast.bad { border-color: rgba(255, 123, 107, 0.55); color: #ffc4bb; }
+@keyframes pop {
+  from { opacity: 0; transform: translate(-50%, -6px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+/* ---- 그리기 ---- */
+#draw-layer {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(6, 10, 18, 0.72);
+  backdrop-filter: blur(2px);
+}
+#draw-box { text-align: center; width: min(74%, 520px); }
+.draw-title {
+  font-size: clamp(11px, 1.9cqw, 18px);
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+.draw-sigil {
+  display: inline-block;
+  width: 0.72em;
+  height: 0.72em;
+  margin-right: 0.55em;
+  border: 1px solid var(--grip);
+  transform: rotate(45deg);
+  box-shadow: inset 0 0 0 2px rgba(255, 209, 102, 0.12), 0 0 12px rgba(255, 209, 102, 0.22);
+}
+#pad {
+  width: 100%;
+  aspect-ratio: 300 / 220;
+  background: rgba(233, 240, 252, 0.96);
+  border: 1px solid rgba(160, 190, 230, 0.5);
+  border-radius: 6px;
+  cursor: crosshair;
+  touch-action: none;
+  display: block;
+}
+.draw-legend {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 7px;
+  color: var(--dim);
+  font-size: clamp(8px, 1.25cqw, 12px);
+}
+.draw-legend .k { color: var(--ink); font-style: normal; font-weight: 700; }
+.draw-keys { display: flex; justify-content: center; gap: 8px; margin-top: 8px; }
+.draw-keys button {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--ink);
+  border: 1px solid var(--stroke);
+  border-radius: 5px;
+  padding: 5px 11px;
+  font: inherit;
+  font-size: clamp(9px, 1.3cqw, 13px);
+  cursor: pointer;
+}
+.draw-keys button:hover { background: rgba(255, 255, 255, 0.15); }
+kbd {
+  color: var(--dim);
+  font-size: 0.82em;
+  margin-left: 3px;
+  font-family: inherit;
+}
+
+/* 그리는 동안 도구 패널이 실시간 분석기로 바뀐다 */
+#tool-panel.live {
+  left: auto;
+  right: 2.2%;
+  top: 50%;
+  transform: translateY(-50%);
+  min-width: 24%;
+  border-color: rgba(127, 208, 255, 0.45);
+}
+
+/* ---- 오버레이 ---- */
+#overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(6, 10, 18, 0.9);
+  text-align: center;
+  padding: 4%;
+  overflow-y: auto;
+}
+#overlay h1 {
+  font-size: clamp(18px, 4.4cqw, 44px);
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  text-shadow: 0 0 22px rgba(127, 208, 255, 0.14);
+}
+#overlay .mission {
+  width: min(90%, 560px);
+  margin: 14px auto 0;
+  padding: 8px 12px;
+  color: #c7d4e6;
+  border-top: 1px solid rgba(255, 209, 102, 0.25);
+  border-bottom: 1px solid rgba(255, 209, 102, 0.12);
+  font-size: clamp(9px, 1.35cqw, 13px);
+  line-height: 1.65;
+}
+#overlay .sub {
+  color: var(--dim);
+  font-size: clamp(9px, 1.5cqw, 15px);
+  margin-top: 8px;
+  line-height: 1.6;
+}
+#overlay .keys {
+  margin-top: 16px;
+  color: var(--dim);
+  font-size: clamp(9px, 1.35cqw, 13px);
+  line-height: 1.9;
+}
+#overlay .keys b { color: var(--ink); }
+#overlay button {
+  margin-top: 16px;
+  background: #e8eef8;
+  color: #0b1220;
+  border: 0;
+  border-radius: 6px;
+  padding: 9px 22px;
+  font: inherit;
+  font-weight: 700;
+  font-size: clamp(10px, 1.6cqw, 16px);
+  cursor: pointer;
+}
+#overlay button.ghost {
+  background: transparent;
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--stroke);
+}
+#overlay .row { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+
+.dex {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
+  gap: 6px;
+  margin-top: 12px;
+  width: min(88%, 620px);
+  max-height: 46cqh;
+  overflow-y: auto;
+  text-align: left;
+}
+.dex-entry {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--stroke);
+  border-radius: 5px;
+  padding: 6px 8px;
+  font-size: clamp(8px, 1.2cqw, 12px);
+}
+.dex-entry .nm { font-weight: 700; }
+.dex-entry .bi { color: var(--dim); font-size: 0.85em; }
+.dex-empty { color: var(--dim); margin-top: 14px; font-size: clamp(9px, 1.4cqw, 14px); }

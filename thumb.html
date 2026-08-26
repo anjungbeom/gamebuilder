@@ -1,0 +1,41 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:1920px;height:1080px;overflow:hidden;background:#070b12;
+  font-family:"Pretendard","Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif;color:#eaf2ff}
+#wrap{position:relative;width:1920px;height:1080px}
+iframe{position:absolute;inset:0;width:1920px;height:1080px;border:0}
+#shade{position:absolute;inset:0;background:
+  linear-gradient(105deg,rgba(5,9,16,.94) 0%,rgba(5,9,16,.82) 34%,rgba(5,9,16,.12) 62%,rgba(5,9,16,.4) 100%)}
+#txt{position:absolute;left:104px;top:50%;transform:translateY(-50%);width:880px}
+h1{font-size:112px;letter-spacing:-.035em;line-height:.95;font-weight:800}
+.sub{margin-top:26px;font-size:40px;font-weight:700;color:#7fd0ff;letter-spacing:-.02em}
+.desc{margin-top:20px;font-size:26px;line-height:1.65;color:#9fb0c8}
+.row{margin-top:40px;display:flex;gap:12px;flex-wrap:wrap}
+.chip{font-size:23px;font-weight:700;padding:11px 20px;border-radius:99px;
+  background:rgba(255,255,255,.07);border:1px solid rgba(150,180,220,.28)}
+.c1{color:#ff7b6b}.c2{color:#7fd0ff}.c3{color:#7ee0c0}.c4{color:#ffd166}
+#sketch{position:absolute;right:150px;top:172px;opacity:.95}
+.cap{position:absolute;right:150px;top:112px;font-size:24px;color:#cfe0f4;
+  text-align:right;width:520px;font-weight:700}
+</style></head><body><div id="wrap">
+<iframe src="index.html?seed=97"></iframe>
+<div id="shade"></div>
+<div class="cap">이렇게 그리면 → 뾰족한 끝 = 절단력</div>
+<svg id="sketch" width="520" height="220" viewBox="0 0 520 220">
+  <polyline points="20,190 250,26 480,190" fill="none" stroke="#0d1420"
+    stroke-width="17" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="20,190 250,26 480,190" fill="none" stroke="#ff7b6b"
+    stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="250" cy="26" r="15" fill="none" stroke="#ff7b6b" stroke-width="3" opacity=".65"/>
+</svg>
+<div id="txt">
+  <h1>Drawn<br>Frontier</h1>
+  <div class="sub">그린 것이 곧 도구가 된다</div>
+  <p class="desc">무엇을 그렸는지는 묻지 않는다.<br>어떻게 생겼는지만 잰다.</p>
+  <div class="row">
+    <span class="chip c1">뾰족하게 · 절단력</span>
+    <span class="chip c2">길게 · 사거리</span>
+    <span class="chip c3">닫아서 · 부력</span>
+    <span class="chip c4">여러 획 · 접지력</span>
+  </div>
+</div></div></body></html>

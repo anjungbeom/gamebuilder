@@ -1,16 +1,59 @@
 <!doctype html>
 <html lang="ko">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#101923">
-  <title>Drawn Frontier</title>
-  <link rel="stylesheet" href="style.css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d1420">
+<meta name="description" content="그린 형질로 길을 열고 다섯 개의 개척 맥점을 잇는 절차 생성 탐험 게임.">
+<title>Drawn Frontier — 길이 없으면, 그려서 연다</title>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <main class="game-shell" aria-label="도트 개척 게임 데모">
-    <canvas id="game" width="384" height="216" tabindex="0" aria-label="게임 화면"></canvas>
-  </main>
-  <script src="game.js"></script>
+<div id="frame">
+  <div id="stage">
+    <canvas id="game" width="384" height="216" aria-label="게임 화면"></canvas>
+
+    <!-- 도구 패널: 평소엔 든 도구를, 그리는 중엔 실시간 분석을 보여준다 -->
+    <div id="tool-panel" class="panel" hidden>
+      <div class="tool-head">
+        <span id="tool-name">맨손</span>
+        <span id="tool-dura" class="dura"></span>
+      </div>
+      <div id="bars"></div>
+    </div>
+
+    <div id="progress" class="panel" hidden>
+      <div><b id="p-marks">0</b><span>/5 맥점</span></div>
+      <div><b id="p-catalog">0</b><span>종 기록</span></div>
+      <div><b id="p-depth">0</b><span>최장 거리</span></div>
+    </div>
+
+    <div id="hint" class="hint" hidden></div>
+    <div id="toast" class="toast" hidden></div>
+
+    <!-- 그리기 화면 -->
+    <div id="draw-layer" hidden>
+      <div id="draw-box">
+        <div class="draw-title"><span class="draw-sigil" aria-hidden="true"></span>개척 도구 설계</div>
+        <canvas id="pad" width="300" height="220"></canvas>
+        <div class="draw-legend">
+          <span><i class="k">길게</i> 도달력</span>
+          <span><i class="k">뾰족하게</i> 쐐기력</span>
+          <span><i class="k">닫아서</i> 부력</span>
+          <span><i class="k">여러 획</i> 결속력</span>
+        </div>
+        <div class="draw-keys">
+          <button data-act="confirm">제작 <kbd>Enter</kbd></button>
+          <button data-act="clear">다시 그리기 <kbd>Backspace</kbd></button>
+          <button data-act="cancel">접기 <kbd>Esc</kbd></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 타이틀 / 도감 / 결말 -->
+    <div id="overlay" hidden></div>
+  </div>
+</div>
+<script type="module" src="src/game.js"></script>
 </body>
 </html>
