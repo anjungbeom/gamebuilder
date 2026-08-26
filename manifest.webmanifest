@@ -1,0 +1,16 @@
+{
+  "name": "Drawn Frontier",
+  "short_name": "Frontier",
+  "description": "직접 그린 장비로 절차 생성 세계를 개척하는 도트 탐험 게임",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#070b12",
+  "theme_color": "#0d1420",
+  "orientation": "landscape",
+  "icons": [{
+    "src": "thumbnail.png",
+    "sizes": "1920x1080",
+    "type": "image/png",
+    "purpose": "any"
+  }]
+}

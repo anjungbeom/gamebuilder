@@ -1,22 +1,44 @@
-# 제출물
+# OpenAI Game Builders Seoul — Track 1 제출본
+
+공식 제출 안내: https://openaigame2026.com/#apply:track1-submission-guide
 
 ## 게임 제목
+
 Drawn Frontier
 
-## 설명
-길이 없으면 그려서 연다. 손도구는 바위·거리·물길·포획에, 신발은 질주·안정·수명에 영향을 주는 절차 생성 개척 게임. 적대종을 포획해 획과 장비칸을 늘리고, 다섯 맥점을 연결하며 매번 다른 지형과 생태를 개척한다.
+## 게임 소개 — 130/200자
 
-## 썸네일
- — 1920x1080 (16:9), PNG
+길이 없으면 직접 그려서 연다. 획의 형태가 바위·거리·물길·포획 능력이 되고, 신발은 질주 속도와 수명을 바꾼다. 무한 절차 생성 세계에서 적대 크리처를 포획해 획과 장비칸을 늘리고 다섯 개의 개척 맥점을 연결하는 도트 탐험 게임.
 
-## 플레이 링크
-https://anjungbeom.github.io/drawn-frontier/
+## 썸네일 — 필수
 
-로그인·제약 없이 바로 실행되는 웹 빌드. 외부 요청 없음.
-`?seed=1234`를 붙이면 같은 세계를 재현할 수 있다.
+`thumbnail.png` — 1920×1080, PNG, 951,012바이트, 16:9, 10MB 이하
+
+## 플레이 링크 — 필수
+
+https://anjungbeom.github.io/gamebuilder/
+
+로그인·승인·설치 없이 바로 실행되는 웹 빌드입니다. `?seed=1234`를 붙이면 같은 세계를 재현할 수 있습니다.
 
 ## 저장소
-https://github.com/anjungbeom/drawn-frontier
+
+https://github.com/anjungbeom/gamebuilder
 
 ## 조작
+
 WASD/방향키 이동 · Shift 달리기 · Tab 장비 팔레트 · Q 손도구 설계 · Space 사용 · C 생태 기록
+
+## 선택 제출 — 가산점
+
+- 데모 영상 링크: 업로드 후 입력
+- Codex 제작 과정: `submission/CODEX_PROCESS.md` 내용을 제출 폼에 복사
+- 3분 영상 대본과 촬영 순서: `submission/DEMO_SCRIPT.md`
+
+## 심사·제출 보조 문서
+
+- `submission/JUDGE_GUIDE.md` — 심사위원 3분 퀵스타트
+- `submission/CHALLENGE_CHANGELOG.md` — 챌린지 기간 신규 개발 내용
+- `submission/RIGHTS_AND_ATTRIBUTION.md` — 권리·외부 자산 확인
+- `submission/CHECKLIST.md` — 최종 제출 체크리스트
+
+개인정보, 팀명, 오프라인 참석 여부, 약관 동의와 최종 제출 버튼은 대표자가 직접 입력합니다.
