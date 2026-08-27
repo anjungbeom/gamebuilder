@@ -4,18 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0d1420">
-<meta name="description" content="그린 형질로 길을 열고 다섯 개의 개척 맥점을 잇는 절차 생성 탐험 게임.">
+<meta name="description" content="직접 그린 도구로 길을 열고 다섯 지역의 신호기를 활성화하는 절차 생성 탐험 게임.">
 <link rel="canonical" href="https://anjungbeom.github.io/gamebuilder/">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Drawn Frontier — 길이 없으면, 그려서 연다">
-<meta property="og:description" content="직접 그린 장비로 절차 생성 세계를 개척하고 크리처를 포획하는 도트 탐험 게임.">
+<meta property="og:description" content="직접 그린 장비로 절차 생성 세계를 탐사하고 크리처를 포획하는 도트 탐험 게임.">
 <meta property="og:url" content="https://anjungbeom.github.io/gamebuilder/">
 <meta property="og:image" content="https://anjungbeom.github.io/gamebuilder/thumbnail.png">
 <meta property="og:image:width" content="1920">
 <meta property="og:image:height" content="1080">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Drawn Frontier — 길이 없으면, 그려서 연다">
-<meta name="twitter:description" content="직접 그린 장비로 절차 생성 세계를 개척하고 크리처를 포획하는 도트 탐험 게임.">
+<meta name="twitter:description" content="직접 그린 장비로 절차 생성 세계를 탐사하고 크리처를 포획하는 도트 탐험 게임.">
 <meta name="twitter:image" content="https://anjungbeom.github.io/gamebuilder/thumbnail.png">
 <link rel="manifest" href="manifest.webmanifest">
 <title>Drawn Frontier — 길이 없으면, 그려서 연다</title>
@@ -38,27 +38,32 @@
 
     <div id="vitals" class="panel" hidden aria-label="탐험가 상태">
       <div id="hearts" class="hearts"></div>
-      <div class="rank-line"><span>개척 공명</span><b id="p-resonance">0</b></div>
+      <div class="rank-line"><span>탐사 등급</span><b id="p-resonance">0등급</b></div>
+      <div class="shard-line"><span>기술 조각</span><b id="p-fragments">0 / 2</b></div>
       <div class="shoe-line"><span>신발</span><b id="shoe-name">기본 장화</b></div>
-      <div class="palette-key"><kbd>Tab</kbd> 장비·수집 팔레트</div>
+      <div class="environment-line"><span id="env-time">낮</span><b id="env-weather">맑음</b></div>
+      <div class="environment-line"><span id="env-temp">18°C · 쾌적</span><b id="env-noise">조용함</b></div>
+      <div class="palette-key"><kbd>Space</kbd> 방향 공격 · <kbd>P</kbd> 패링 · <kbd>F</kbd> 포획 · <kbd>V</kbd> 도전 · <kbd>M</kbd> 지도</div>
     </div>
 
     <div id="progress" class="panel" hidden>
-      <div><b id="p-marks">0</b><span>/5 맥점</span></div>
-      <div><b id="p-catalog">0</b><span>기록한 종</span></div>
-      <div><b id="p-depth">0</b><span>최장 거리</span></div>
-      <div><b id="p-captures">0</b><span>위협종 포획</span></div>
-      <div><b id="p-ink">10</b><span>획 조각</span></div>
+      <div><b id="p-marks">0</b><span>/5 신호기</span></div>
+      <div><b id="p-catalog">0</b><span>발견한 종</span></div>
+      <div><b id="p-depth">0</b><span>이동 거리</span></div>
+      <div><b id="p-captures">0</b><span>적대 포획</span></div>
+      <div><b id="p-ink">10</b><span>잉크</span></div>
     </div>
 
     <div id="map-panel" class="panel" hidden>
       <div class="map-head"><span>현장 나침반</span><b id="map-coord">0 · 0</b></div>
       <canvas id="minimap" width="88" height="64" aria-label="주변 지형 지도"></canvas>
-      <div id="goal-text" class="goal-text">가장 가까운 맥점을 찾는 중</div>
+      <div id="goal-text" class="goal-text">가장 가까운 신호기를 찾는 중</div>
     </div>
 
     <div id="hint" class="hint" hidden></div>
     <div id="toast" class="toast" hidden></div>
+    <div id="celebration" class="celebration" hidden></div>
+    <div id="reward-feed" class="reward-feed" hidden></div>
 
     <!-- 그리기 화면 -->
     <div id="draw-layer" hidden>
@@ -66,12 +71,12 @@
         <div class="draw-title"><span class="draw-sigil" aria-hidden="true"></span><span id="draw-title-text">손도구 설계</span></div>
         <canvas id="pad" width="300" height="220"></canvas>
         <div id="draw-legend" class="draw-legend">
-          <span><i class="k">뾰족하게</i> 바위</span>
-          <span><i class="k">길게</i> 거리</span>
-          <span><i class="k">닫아서</i> 물길</span>
-          <span><i class="k">여러 획</i> 포획</span>
+          <span><i class="k">뾰족하게</i> 파쇄력</span>
+          <span><i class="k">길게</i> 사거리</span>
+          <span><i class="k">닫아서</i> 부력</span>
+          <span><i class="k">여러 획</i> 포획력</span>
         </div>
-        <div id="draw-budget" class="draw-budget">획 하나를 그릴 때마다 획 조각 1개를 사용합니다.</div>
+        <div id="draw-budget" class="draw-budget">획 하나를 그릴 때마다 잉크 1개를 사용합니다.</div>
         <div class="draw-keys">
           <button data-act="confirm">제작 <kbd>Enter</kbd></button>
           <button data-act="delete-toggle">획 지우기</button>

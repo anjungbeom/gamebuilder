@@ -1,7 +1,7 @@
 // 세계를 도트로 그린다. 글자는 캔버스가 아니라 DOM이 맡는다.
 
 import {
-  TILE, BIOME, OBSTACLE, biomeAt, obstacleAt, isWater, isBiomeSolid
+  TILE, BIOME, OBSTACLE, biomeAt, obstacleAt, isWater, isBiomeSolid, regionRequiredMarksAt
 } from "./world.js";
 import { hashUnit } from "./rng.js";
 import { bodyPlan } from "./creature.js";
@@ -26,7 +26,7 @@ export function tileColor(tx, ty, seed) {
 }
 
 /** 보이는 타일만 그린다. 카메라는 월드 픽셀 좌표. */
-export function drawTerrain(ctx, camX, camY, viewW, viewH, seed, cleared) {
+export function drawTerrain(ctx, camX, camY, viewW, viewH, seed, cleared, foundCount = 0, time = 0) {
   const t0x = Math.floor(camX / TILE) - 1;
   const t0y = Math.floor(camY / TILE) - 1;
   const t1x = Math.ceil((camX + viewW) / TILE) + 1;
@@ -36,6 +36,15 @@ export function drawTerrain(ctx, camX, camY, viewW, viewH, seed, cleared) {
     for (let tx = t0x; tx <= t1x; tx++) {
       const sx = Math.round(tx * TILE - camX);
       const sy = Math.round(ty * TILE - camY);
+
+      if (regionRequiredMarksAt(tx, ty) > foundCount) {
+        const cloud = hashUnit(tx, ty, seed + Math.floor(time / 900));
+        ctx.fillStyle = cloud > .52 ? "#111b27" : "#0c1520";
+        ctx.fillRect(sx, sy, TILE, TILE);
+        ctx.fillStyle = `rgba(165,184,197,${(.06 + cloud * .1).toFixed(3)})`;
+        ctx.fillRect(sx + Math.floor(cloud * 5), sy + 4, 10, 5);
+        continue;
+      }
 
       ctx.fillStyle = tileColor(tx, ty, seed);
       ctx.fillRect(sx, sy, TILE, TILE);
@@ -142,6 +151,29 @@ function drawObstacle(ctx, sx, sy, kind, tx, ty, seed) {
     return;
   }
 
+  if (kind === OBSTACLE.TREE) {
+    ctx.fillStyle = "rgba(0,0,0,.25)";
+    ctx.fillRect(sx - 5, sy + 12, 25, 4);
+    ctx.fillStyle = "#5b3d27";
+    ctx.fillRect(sx + 6, sy - 9, 5, 23);
+    ctx.fillStyle = "#2b6338";
+    ctx.fillRect(sx - 4 + wobble, sy - 17, 25, 13);
+    ctx.fillRect(sx, sy - 23, 17, 10);
+    ctx.fillStyle = "#43814a";
+    ctx.fillRect(sx + 2, sy - 20, 8, 5);
+    return;
+  }
+
+  if (kind === OBSTACLE.MOUNTAIN) {
+    ctx.fillStyle = "rgba(0,0,0,.3)";
+    ctx.fillRect(sx - 6, sy + 12, 29, 5);
+    ctx.fillStyle = "#676b72";
+    ctx.beginPath(); ctx.moveTo(sx - 7, sy + 13); ctx.lineTo(sx + 8, sy - 18); ctx.lineTo(sx + 23, sy + 13); ctx.fill();
+    ctx.fillStyle = "#9ba0a7";
+    ctx.beginPath(); ctx.moveTo(sx + 2, sy - 5); ctx.lineTo(sx + 8, sy - 18); ctx.lineTo(sx + 13, sy - 6); ctx.fill();
+    return;
+  }
+
   // 가시덩굴: 낮게 깔린 엉킴.
   ctx.fillStyle = "#6b4a2a";
   for (let i = 0; i < 4; i++) {
@@ -173,7 +205,7 @@ export function drawLandmark(ctx, sx, sy, found, time) {
   ctx.fillStyle = "rgba(0,0,0,0.3)";
   ctx.fillRect(sx - 4, sy + 4, 9, 3);
 
-  // 원래 표석 위에 개척망의 공통 룬만 추가한다.
+  // 신호기는 멀리서도 같은 목표물로 읽히도록 공통 표식을 쓴다.
   ctx.fillStyle = found ? "#fff4bd" : "#7b8792";
   ctx.fillRect(sx - 1, sy - 7, 3, 3);
   ctx.fillRect(sx, sy - 9, 1, 7);
@@ -199,6 +231,68 @@ export function drawCreature(ctx, creature, sx, sy, time) {
   const dark = `hsl(${g.hue.toFixed(0)},${g.sat.toFixed(0)}%,${Math.max(14, g.light - 20).toFixed(0)}%)`;
   const lightC = `hsl(${g.hue.toFixed(0)},${g.sat.toFixed(0)}%,${Math.min(88, g.light + 18).toFixed(0)}%)`;
 
+  if (creature.bossParts) {
+    for (const part of creature.bossParts) {
+      const px = sx + part.ox;
+      const py = sy + part.oy;
+      ctx.strokeStyle = part.destroyed ? "rgba(105,115,126,.35)" : part.active ? "#fff0a8" : "rgba(218,220,230,.38)";
+      ctx.lineWidth = part.active ? 2 : 1;
+      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(px, py); ctx.stroke();
+      ctx.fillStyle = part.destroyed ? "#555c66" : part.active ? "#ffd166" : "#8a789b";
+      ctx.fillRect(px - 5, py - 5, 10, 10);
+      if (!part.destroyed) {
+        ctx.fillStyle = "#fff4bd";
+        ctx.fillRect(px - 2, py - 2, 4, 4);
+      }
+    }
+  }
+
+  if (creature.isPet) {
+    ctx.strokeStyle = creature.downTimer > 0 ? "rgba(160,175,190,.65)" : "rgba(126,224,192,.8)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(sx, sy, g.bodyRadius * 2.4 + 5, 0, Math.PI * 2);
+    ctx.stroke();
+    if (creature.downTimer > 0) {
+      ctx.fillStyle = "#d5dde8";
+      ctx.fillRect(sx - 4, sy - g.bodyRadius - 12, 3, 1);
+      ctx.fillRect(sx - 3, sy - g.bodyRadius - 13, 1, 3);
+      ctx.fillRect(sx + 2, sy - g.bodyRadius - 12, 3, 1);
+      ctx.fillRect(sx + 3, sy - g.bodyRadius - 13, 1, 3);
+    }
+  }
+
+  if (creature.disarmed > 0) {
+    ctx.fillStyle = "#b7e8ff";
+    ctx.fillRect(sx - 6, sy - g.bodyRadius - 16, 3, 3);
+    ctx.fillRect(sx + 4, sy - g.bodyRadius - 14, 3, 3);
+    ctx.fillStyle = "#dcefff";
+    ctx.fillRect(sx - 2, sy - g.bodyRadius - 18, 4, 1);
+  }
+
+  if (creature.rank !== "normal") {
+    const pulse = 0.35 + Math.sin(time / 180 + creature.phase) * 0.12;
+    ctx.strokeStyle = creature.rank === "fieldboss" ? `rgba(255,97,93,${pulse})` : `rgba(255,209,102,${pulse})`;
+    ctx.lineWidth = creature.rank === "fieldboss" ? 3 : 2;
+    ctx.beginPath();
+    ctx.arc(sx, sy, g.bodyRadius * 2.6 + 7, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = creature.rank === "fieldboss" ? "#ff615d" : "#ffd166";
+    ctx.fillRect(sx - 7, sy - g.bodyRadius - 18, 14, 2);
+    ctx.fillRect(sx - 5, sy - g.bodyRadius - 21, 3, 3);
+    ctx.fillRect(sx + 2, sy - g.bodyRadius - 21, 3, 3);
+  }
+
+  if (creature.hostile && Number.isFinite(creature.hp)) {
+    const width = creature.rank === "fieldboss" ? 30 : creature.rank === "midboss" ? 24 : 14;
+    const y = Math.round(sy - g.bodyRadius - (creature.rank === "normal" ? 14 : 28));
+    ctx.fillStyle = "rgba(10,15,22,.8)";
+    ctx.fillRect(Math.round(sx - width / 2), y, width, 3);
+    ctx.fillStyle = creature.rank === "normal" ? "#ff786c" : "#ffd166";
+    ctx.fillRect(Math.round(sx - width / 2) + 1, y + 1, Math.round((width - 2) * creature.hp / creature.maxHp), 1);
+    if (creature.weakness && (creature.rank === "normal" || creature.weaknessExposed)) drawWeaknessMark(ctx, sx, y - 5, creature.weakness);
+  }
+
   // 행동을 보기 전에도 적대 여부가 읽히는 고정 표식.
   const signal = creature.hostile ? "#ff615d" : "#7ee0c0";
   ctx.strokeStyle = signal;
@@ -210,10 +304,21 @@ export function drawCreature(ctx, creature, sx, sy, time) {
   if (creature.hostile) {
     ctx.fillRect(sx - 1, sy - g.bodyRadius - 10, 2, 5);
     ctx.fillRect(sx - 1, sy - g.bodyRadius - 3, 2, 2);
+    if (creature.ranged) {
+      ctx.fillStyle = "#ffb06b";
+      ctx.fillRect(sx - 5, sy - g.bodyRadius - 8, 2, 2);
+      ctx.fillRect(sx + 4, sy - g.bodyRadius - 8, 2, 2);
+    }
   } else {
     ctx.fillRect(sx - 3, sy - g.bodyRadius - 8, 2, 2);
     ctx.fillRect(sx + 2, sy - g.bodyRadius - 8, 2, 2);
     ctx.fillRect(sx - 1, sy - g.bodyRadius - 6, 3, 3);
+  }
+
+  if (creature.stun > 0) {
+    ctx.fillStyle = "#b7e8ff";
+    ctx.fillRect(sx - 5, sy - g.bodyRadius - 13, 2, 2);
+    ctx.fillRect(sx + 3, sy - g.bodyRadius - 11, 2, 2);
   }
 
   ctx.fillStyle = "rgba(0,0,0,0.22)";
@@ -239,6 +344,46 @@ export function drawCreature(ctx, creature, sx, sy, time) {
     ctx.fillRect(px - r, py + r - 1, r * 2, 1);
   }
 
+  // 유전자 부위는 작은 도트 실루엣으로 읽히게 한다.
+  const headRadius = Math.max(1, Math.round(parts[0].radius));
+  ctx.fillStyle = dark;
+  if (g.hasHorns) {
+    ctx.fillRect(sx - 4, sy - headRadius - 4, 2, 4);
+    ctx.fillRect(sx + 3, sy - headRadius - 4, 2, 4);
+    ctx.fillStyle = lightC;
+    ctx.fillRect(sx - 4, sy - headRadius - 5, 2, 1);
+    ctx.fillRect(sx + 3, sy - headRadius - 5, 2, 1);
+  }
+  if (g.hasAntennae) {
+    ctx.strokeStyle = lightC;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(sx - 2, sy - headRadius - 1); ctx.lineTo(sx - 5, sy - headRadius - 6);
+    ctx.moveTo(sx + 2, sy - headRadius - 1); ctx.lineTo(sx + 5, sy - headRadius - 6);
+    ctx.stroke();
+  }
+  if (g.hasFins) {
+    ctx.fillStyle = `hsl(${((g.hue + 42) % 360).toFixed(0)},${g.sat.toFixed(0)}%,${Math.min(88, g.light + 20).toFixed(0)}%)`;
+    ctx.fillRect(sx - headRadius - 4, sy - 2, 4, 3);
+    ctx.fillRect(sx + headRadius, sy - 2, 4, 3);
+  }
+  if (g.shell) {
+    ctx.strokeStyle = "rgba(255,240,190,.75)";
+    ctx.strokeRect(sx - Math.round(g.bodyRadius * 1.4), sy - Math.round(g.bodyRadius * .9), Math.round(g.bodyRadius * 2.8), Math.round(g.bodyRadius * 1.8));
+  }
+  if (g.pattern > 0) {
+    ctx.fillStyle = `hsl(${((g.hue + 180) % 360).toFixed(0)},${Math.min(90, g.sat + 12).toFixed(0)}%,${Math.min(90, g.light + 16).toFixed(0)}%)`;
+    if (g.pattern === 1) ctx.fillRect(sx - 1, sy - 2, 2, 4);
+    else if (g.pattern === 2) { ctx.fillRect(sx - 5, sy, 2, 2); ctx.fillRect(sx + 4, sy, 2, 2); }
+    else { ctx.fillRect(sx - 3, sy - 2, 2, 2); ctx.fillRect(sx + 2, sy + 1, 2, 2); }
+  }
+  if (creature.hitFlash > 0) {
+    ctx.fillStyle = "rgba(255,255,255,.9)";
+    ctx.fillRect(sx - 2, sy - g.bodyRadius - 2, 4, 2);
+    ctx.fillRect(sx - g.bodyRadius - 3, sy, 2, 2);
+    ctx.fillRect(sx + g.bodyRadius + 1, sy - 1, 2, 2);
+  }
+
   const headX = Math.round(sx);
   const headY = Math.round(sy + bob);
   const hr = Math.max(1, Math.round(parts[0].radius));
@@ -262,7 +407,68 @@ export function drawCreature(ctx, creature, sx, sy, time) {
   }
 }
 
-export function drawPlayer(ctx, sx, sy, faceX, faceY, walking, time, afloat, running = false, shoes = null, hurt = 0) {
+export function drawVillage(ctx, village, camX, camY, time) {
+  const x = Math.round(village.tx * TILE + TILE / 2 - camX);
+  const y = Math.round(village.ty * TILE + TILE / 2 - camY);
+  const glow = .16 + Math.sin(time / 260 + village.index) * .05;
+  ctx.fillStyle = `rgba(126,224,192,${glow.toFixed(3)})`;
+  ctx.beginPath(); ctx.arc(x, y, 34, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = "rgba(0,0,0,.28)"; ctx.fillRect(x - 24, y + 10, 48, 5);
+  ctx.fillStyle = "#8f6a42"; ctx.fillRect(x - 22, y - 5, 18, 17); ctx.fillRect(x + 5, y - 2, 16, 14);
+  ctx.fillStyle = "#d58b56";
+  ctx.beginPath(); ctx.moveTo(x - 25, y - 5); ctx.lineTo(x - 13, y - 17); ctx.lineTo(x - 1, y - 5); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(x + 2, y - 2); ctx.lineTo(x + 13, y - 13); ctx.lineTo(x + 24, y - 2); ctx.fill();
+  ctx.fillStyle = "#7ee0c0"; ctx.fillRect(x - 1, y + 3, 3, 9); ctx.fillStyle = "#fff1b8"; ctx.fillRect(x, y - 2, 1, 7);
+}
+
+export function drawVillager(ctx, villager, sx, sy, time) {
+  const bob = villager.moving ? Math.round(Math.sin(time / 100 + villager.phase) * 1) : 0;
+  const x = Math.round(sx), y = Math.round(sy) + bob;
+  ctx.fillStyle = "rgba(0,0,0,.23)"; ctx.fillRect(x - 4, y + 6, 9, 2);
+  ctx.fillStyle = villager.color; ctx.fillRect(x - 4, y - 2, 9, 8);
+  ctx.fillStyle = villager.accent; ctx.fillRect(x - 3, y - 7, 7, 6);
+  ctx.fillStyle = "#15202b"; ctx.fillRect(x + (villager.facing > 0 ? 2 : -2), y - 5, 1, 1);
+  ctx.fillStyle = "#39475a"; ctx.fillRect(x - 3, y + 5, 3, 4); ctx.fillRect(x + 1, y + 5, 3, 4);
+}
+
+export function drawSmokeEffects(ctx, effects, camX, camY) {
+  for (const effect of effects) {
+    const progress = 1 - effect.time / effect.duration;
+    const x = effect.x - camX, y = effect.y - camY;
+    for (let i = 0; i < effect.count; i++) {
+      const angle = i * 2.399;
+      const distance = progress * (8 + (i % 4) * 5);
+      const size = Math.max(1, Math.round((1 - progress) * (effect.big ? 8 : 5)));
+      ctx.fillStyle = `rgba(${i % 2 ? "180,188,197" : "91,101,112"},${Math.max(0, .72 - progress * .65).toFixed(3)})`;
+      ctx.fillRect(Math.round(x + Math.cos(angle) * distance - size / 2), Math.round(y - progress * 18 + Math.sin(angle) * distance * .4), size, size);
+    }
+  }
+}
+
+function drawWeaknessMark(ctx, x, y, weakness) {
+  const color = weakness === "edge" ? "#ff7b6b" : weakness === "reach" ? "#7fd0ff" : weakness === "buoy" ? "#7ee0c0" : "#ffd166";
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = 1;
+  if (weakness === "edge") {
+    ctx.beginPath(); ctx.moveTo(x, y - 3); ctx.lineTo(x + 3, y + 2); ctx.lineTo(x - 3, y + 2); ctx.closePath(); ctx.stroke();
+  } else if (weakness === "reach") {
+    ctx.fillRect(x - 4, y, 8, 1); ctx.fillRect(x + 2, y - 2, 2, 5);
+  } else if (weakness === "buoy") {
+    ctx.strokeRect(x - 3, y - 3, 6, 6);
+  } else {
+    ctx.fillRect(x - 4, y - 2, 1, 5); ctx.fillRect(x, y - 3, 1, 6); ctx.fillRect(x + 4, y - 2, 1, 5);
+  }
+}
+
+export function drawPlayer(ctx, sx, sy, faceX, faceY, walking, time, afloat, running = false, shoes = null, hurt = 0, deathProgress = 0) {
+  if (deathProgress > 0) {
+    ctx.save();
+    ctx.translate(Math.round(sx), Math.round(sy) + Math.round(deathProgress * 6));
+    ctx.rotate(deathProgress * 1.25);
+    sx = 0;
+    sy = 0;
+  }
   const bob = walking ? Math.round(Math.sin(time / 90) * 1) : 0;
   const stride = walking ? Math.round(Math.sin(time / 70)) : 0;
   const x = Math.round(sx);
@@ -339,6 +545,7 @@ export function drawPlayer(ctx, sx, sy, faceX, faceY, walking, time, afloat, run
     ctx.fillRect(x - 4, y - 5, 9, 1);
     ctx.fillRect(x + (front ? 3 : -5), y - 4, 3, 2);
   }
+  if (deathProgress > 0) ctx.restore();
 }
 
 /**
@@ -402,5 +609,110 @@ export function drawVignette(ctx, w, h, hurt = 0) {
     const a = Math.min(0.22, hurt * 0.2);
     ctx.fillStyle = `rgba(255,73,63,${a.toFixed(3)})`;
     ctx.fillRect(0, 0, w, h);
+  }
+}
+
+export function drawParryEffect(ctx, sx, sy, faceX, faceY, timer, cooldown, flash) {
+  if (timer <= 0 && flash <= 0) return;
+  const fx = faceX || 1;
+  const fy = faceY || 0;
+  const angle = Math.atan2(fy, fx);
+  const active = timer > 0;
+  ctx.save();
+  ctx.translate(Math.round(sx), Math.round(sy));
+  ctx.strokeStyle = active ? "#dcefff" : "rgba(126,224,192,.72)";
+  ctx.lineWidth = active ? 2 : 1;
+  ctx.beginPath();
+  ctx.arc(0, 0, 14, angle - 0.82, angle + 0.82);
+  ctx.stroke();
+  if (active) {
+    ctx.fillStyle = "#fff4bd";
+    ctx.fillRect(Math.round(Math.cos(angle) * 12) - 1, Math.round(Math.sin(angle) * 12) - 1, 3, 3);
+  }
+  ctx.restore();
+}
+
+export function drawRevealEffect(ctx, effect, camX, camY) {
+  if (!effect) return;
+  const x = Math.round(effect.x - camX);
+  const y = Math.round(effect.y - camY);
+  const progress = 1 - effect.time / effect.duration;
+  const radius = 14 + progress * 150;
+  const alpha = Math.max(0, 1 - progress);
+  ctx.save();
+  ctx.strokeStyle = `rgba(255,226,132,${(.9 * alpha).toFixed(3)})`;
+  ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.stroke();
+  const beamHeight = Math.round((1 - Math.min(1, progress * 1.5)) * 190);
+  ctx.fillStyle = `rgba(255,236,160,${(.24 * alpha).toFixed(3)})`;
+  ctx.fillRect(x - 7, y - beamHeight, 14, beamHeight);
+  ctx.fillStyle = `rgba(255,255,220,${(.7 * alpha).toFixed(3)})`;
+  ctx.fillRect(x - 1, y - beamHeight, 3, beamHeight);
+  for (let i = 0; i < 12; i++) {
+    const angle = i / 12 * Math.PI * 2;
+    const distance = 18 + progress * (70 + (i % 3) * 18);
+    const cx = Math.round(x + Math.cos(angle) * distance);
+    const cy = Math.round(y + Math.sin(angle) * distance * .55);
+    ctx.fillStyle = `rgba(185,201,211,${(.18 * alpha).toFixed(3)})`;
+    ctx.fillRect(cx - 12, cy - 4, 24, 8);
+    ctx.fillRect(cx - 6, cy - 8, 14, 5);
+  }
+  ctx.restore();
+}
+
+export function drawAtmosphere(ctx, w, h, env, time) {
+  if (!env) return;
+  const nightAlpha = Math.max(0, .42 - env.daylight * .38);
+  if (nightAlpha > .01) {
+    ctx.fillStyle = `rgba(8,16,38,${nightAlpha.toFixed(3)})`;
+    ctx.fillRect(0, 0, w, h);
+  }
+  const weather = env.weather.key;
+  if (weather === "rain") {
+    ctx.strokeStyle = "rgba(164,211,239,.38)";
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 34; i++) {
+      const x = (i * 47 + time * .13) % (w + 30) - 15;
+      const y = (i * 29 + time * .22) % (h + 20) - 10;
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - 4, y + 9); ctx.stroke();
+    }
+  } else if (weather === "fog") {
+    for (let i = 0; i < 5; i++) {
+      const x = ((i * 97 + time * .012) % (w + 120)) - 60;
+      ctx.fillStyle = "rgba(205,220,226,.055)";
+      ctx.fillRect(x, 25 + i * 37, 115, 18);
+    }
+  } else if (weather === "wind") {
+    ctx.strokeStyle = "rgba(225,240,230,.18)";
+    for (let i = 0; i < 12; i++) {
+      const x = (i * 61 + time * .08) % (w + 25) - 20;
+      const y = 18 + (i * 37) % (h - 25);
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 14, y); ctx.stroke();
+    }
+  } else if (weather === "heat") {
+    ctx.fillStyle = "rgba(255,174,91,.045)";
+    ctx.fillRect(0, 0, w, h);
+  }
+}
+
+export function drawDeathDrops(ctx, drops, camX, camY, time) {
+  for (const drop of drops) {
+    const x = Math.round(drop.x - camX);
+    const y = Math.round(drop.y - camY);
+    const bob = Math.round(Math.sin(time / 110 + x) * 2);
+    ctx.fillStyle = "rgba(255,209,102,.2)";
+    ctx.fillRect(x - 6, y - 5 + bob, 12, 10);
+    if (drop.type === "gear") {
+      ctx.strokeStyle = "#ffd166";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x - 4, y - 3 + bob, 8, 6);
+      ctx.fillStyle = drop.item.color ?? "#ffd166";
+      ctx.fillRect(x - 2, y - 1 + bob, 4, 2);
+    } else {
+      ctx.fillStyle = "#e8f3ff";
+      ctx.fillRect(x - 3, y - 3 + bob, 6, 6);
+      ctx.fillStyle = "#ffd166";
+      ctx.fillRect(x - 1, y - 2 + bob, 2, 4);
+    }
   }
 }

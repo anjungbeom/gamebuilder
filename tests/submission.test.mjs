@@ -16,6 +16,13 @@ test("Codex 활용 설명은 폼 제한 5000자 이하다", () => {
   assert.ok(process.length <= 5000, `codex process=${process.length}`);
 });
 
+test("공개 제출 문서에는 다른 AI 제품명이 노출되지 않는다", () => {
+  const publicDocs = ["SUBMISSION.md", "FRONTIER-README.md", "submission/CODEX_PROCESS.md", "submission/RIGHTS_AND_ATTRIBUTION.md"];
+  for (const path of publicDocs) {
+    assert.doesNotMatch(read(path), /claude|anthropic|클로드|앤트로픽/i, path);
+  }
+});
+
 test("썸네일은 16:9 PNG이며 10MB 이하다", () => {
   const url = new URL("../thumbnail.png", import.meta.url);
   const png = readFileSync(url);
