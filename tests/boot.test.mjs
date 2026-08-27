@@ -1,6 +1,7 @@
 // 브라우저 없이 게임을 부팅해 본다. 첫 프레임이 도는지, 조작이 죽지 않는지만 본다.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { buildGenome } from "../src/creature.js";
 
 function makeEl(id = "") {
   const el = {
@@ -100,6 +101,13 @@ test("이동 입력이 좌표를 바꾸고 자동 저장이 남는다", () => {
   assert.equal(save.faceX, 1, "마지막 이동 방향이 저장되어야 한다");
   assert.equal(save.faceY, 0);
   assert.equal(save.maxHp, 5);
+  assert.ok(save.travelDistance > 0, "이동 거리가 환경 시간으로 저장되어야 한다");
+  assert.ok(Number.isFinite(save.temperature), "체온이 저장되어야 한다");
+  assert.equal(save.fragments, 0);
+  assert.equal(save.frontierTier, 0);
+  assert.equal(save.defeats, 0);
+  assert.equal(save.bossesDefeated, 0);
+  assert.deepEqual(save.inventory, { stone: 0, fiber: 0, resin: 0, essence: 0, mirrorInk: 0 });
   assert.ok(save.hp >= 1 && save.hp <= save.maxHp, "피격 이후의 유효한 체력이 저장되어야 한다");
 });
 
@@ -129,7 +137,7 @@ test("도구를 그려 확정하면 저장에 남는다", () => {
   assert.ok(save.tool.durability > 0);
   assert.ok(save.tool.strokes.length >= 1);
   assert.equal(save.gear.hand.length, 1, "제작한 손도구가 장비 팔레트에 남아야 한다");
-  assert.equal(save.ink, 9, "한 획짜리 장비는 획 조각 하나를 사용한다");
+  assert.equal(save.ink, 9, "한 획짜리 장비는 잉크 하나를 사용한다");
 });
 
 test("지우기 모드에서 선택한 획 하나만 제거된다", () => {
@@ -156,10 +164,10 @@ test("지우기 모드에서 선택한 획 하나만 제거된다", () => {
   assert.equal(save.gear.hand[1].strokes.length, 1);
 });
 
-test("Tab 팔레트에서 신발을 그려 장착한다", () => {
+test("Tab 장비 가방에서 신발을 그려 장착한다", () => {
   const down = winHandlers.get("keydown");
   down(key("Tab"));
-  assert.match(getEl("overlay").innerHTML, /개척 팔레트/);
+  assert.match(getEl("overlay").innerHTML, /장비 가방/);
   assert.match(getEl("overlay").innerHTML, /신발 그리기/);
 
   const click = getEl("overlay")._handlers.get("click");
@@ -199,15 +207,122 @@ test("Shift 달리기는 장거리 이동하며 장착한 신발을 마모시킨
   assert.ok(after.gear.shoes[0].durability < startDurability, "장거리 질주는 신발 수명을 사용해야 한다");
 });
 
+test("탐사 기술 해금 후 점프·지도·반사 잉크·10초 드롭 회수가 동작한다", () => {
+  const unlocked = JSON.parse(store.get("drawn-frontier-v2"));
+  unlocked.fragments = 28;
+  unlocked.frontierTier = 6;
+  unlocked.inventory = { ...unlocked.inventory, mirrorInk: 2 };
+  store.set("drawn-frontier-v2", JSON.stringify(unlocked));
+
+  const overlay = getEl("overlay");
+  const click = overlay._handlers.get("click");
+  const continueBtn = makeEl(); continueBtn.dataset.act = "continue";
+  click({ target: { closest: () => continueBtn } });
+
+  const down = winHandlers.get("keydown");
+  assert.doesNotThrow(() => {
+    down(key("KeyX"));
+    down(key("KeyX"));
+    down(key("KeyM"));
+  });
+  assert.match(overlay.innerHTML, /세계 지도/);
+  down(key("KeyM"));
+
+  down(key("KeyR"));
+  let save = JSON.parse(store.get("drawn-frontier-v2"));
+  assert.equal(save.inventory.mirrorInk, 1, "반사 방벽은 반사 잉크를 하나 사용해야 한다");
+
+  down(key("Tab"));
+  assert.match(overlay.innerHTML, /수집품/);
+  const dropBtn = makeEl(); dropBtn.dataset.act = "drop-item"; dropBtn.dataset.item = "mirrorInk";
+  click({ target: { closest: () => dropBtn } });
+  save = JSON.parse(store.get("drawn-frontier-v2"));
+  assert.equal(save.inventory.mirrorInk, 0, "버린 수집품은 인벤토리에서 빠져야 한다");
+
+  down(key("Space"));
+  let t = 9600;
+  for (let i = 0; i < 20; i++) { frameCb(t); t += 16; }
+  save = JSON.parse(store.get("drawn-frontier-v2"));
+  assert.equal(save.inventory.mirrorInk, 1, "10초가 지나기 전 가까이 가면 다시 주워야 한다");
+
+  down(key("Tab"));
+  click({ target: { closest: () => dropBtn } });
+  down(key("KeyM"));
+  t = 10000;
+  for (let i = 0; i < 660; i++) { frameCb(t); t += 16; }
+  down(key("KeyM"));
+  frameCb(t);
+  down(key("Space"));
+  save = JSON.parse(store.get("drawn-frontier-v2"));
+  assert.equal(save.inventory.mirrorInk, 0, "10초가 지나면 버린 수집품은 사라져야 한다");
+  assert.doesNotThrow(() => down(key("KeyE")));
+});
+
 test("사용/도감/취소 키가 예외 없이 처리된다", () => {
   const down = winHandlers.get("keydown");
   assert.doesNotThrow(() => {
     down(key("Space"));
+    down(key("KeyF"));
     down(key("KeyC"));
     down(key("Escape"));
+    down(key("KeyM"));
+    down(key("KeyM"));
+    down(key("KeyX"));
+    down(key("KeyE"));
+    down(key("KeyR"));
+    down(key("KeyP"));
     let t = 9000;
     for (let i = 0; i < 30; i++) { frameCb(t); t += 16; }
   });
+});
+
+test("V 도전과제 화면은 다음 목표 하나와 완료 목록, 순환 팁을 보여준다", () => {
+  const down = winHandlers.get("keydown");
+  down(key("KeyV"));
+  const html = getEl("overlay").innerHTML;
+  assert.match(html, /다음 도전과제/);
+  assert.match(html, /해금 보상/);
+  assert.match(html, /해금 완료 목록/);
+  assert.match(html, /rotating-tip/);
+  down(key("KeyV"));
+});
+
+test("펫 전용 도구를 만들고 확인 후 방생하면 도구만 보관된다", () => {
+  const saved = JSON.parse(store.get("drawn-frontier-v2"));
+  const genome = buildGenome(4242, "plain");
+  saved.pet = { genome, hp: 4, maxHp: 4, hostile: false, ranged: false, x: saved.px + 10, y: saved.py + 10 };
+  saved.ink = 10;
+  store.set("drawn-frontier-v2", JSON.stringify(saved));
+
+  const overlay = getEl("overlay");
+  const click = overlay._handlers.get("click");
+  const continueBtn = makeEl(); continueBtn.dataset.act = "continue";
+  click({ target: { closest: () => continueBtn } });
+  const down = winHandlers.get("keydown");
+  down(key("Tab"));
+  assert.match(overlay.innerHTML, /펫 방생/);
+
+  const drawBtn = makeEl(); drawBtn.dataset.act = "draw-gear"; drawBtn.dataset.slot = "pet";
+  click({ target: { closest: () => drawBtn } });
+  assert.match(getEl("draw-title-text").textContent, /펫 도구/);
+  assert.match(getEl("draw-legend").innerHTML, /지원거리/);
+  const pad = getEl("pad");
+  pad._handlers.get("pointerdown")(pointer(20, 100));
+  pad._handlers.get("pointermove")(pointer(200, 100));
+  pad._handlers.get("pointerup")({});
+  down(key("Enter"));
+  let after = JSON.parse(store.get("drawn-frontier-v2"));
+  assert.ok(after.petTool?.petStats, "펫 슬롯 전용 성능이 저장되어야 한다");
+
+  down(key("Tab"));
+  const releaseBtn = makeEl(); releaseBtn.dataset.act = "release-pet";
+  click({ target: { closest: () => releaseBtn } });
+  assert.match(overlay.innerHTML, /펫을 방생할까요/);
+  const confirmBtn = makeEl(); confirmBtn.dataset.act = "confirm-release-pet";
+  click({ target: { closest: () => confirmBtn } });
+  after = JSON.parse(store.get("drawn-frontier-v2"));
+  assert.equal(after.pet, null);
+  assert.ok(after.petTool, "방생해도 그려 둔 펫 도구는 보관해야 한다");
 });
 
 test("저장을 다시 불러도 같은 세계다", () => {
@@ -221,4 +336,19 @@ test("저장을 다시 불러도 같은 세계다", () => {
   for (let i = 0; i < 20; i++) { frameCb(t); t += 16; }
   const after = JSON.parse(store.get("drawn-frontier-v2"));
   assert.equal(after.seed, before.seed);
+});
+
+test("이전 저장의 어색한 장비 이름은 현재 성능 이름으로 바뀐다", () => {
+  const legacy = JSON.parse(store.get("drawn-frontier-v2"));
+  assert.ok(legacy.gear.hand.length > 0);
+  legacy.gear.hand[0].name = "개척자 명조";
+  store.set("drawn-frontier-v2", JSON.stringify(legacy));
+
+  const overlay = getEl("overlay");
+  const click = overlay._handlers.get("click");
+  const continueBtn = makeEl(); continueBtn.dataset.act = "continue";
+  click({ target: { closest: () => continueBtn } });
+  winHandlers.get("keydown")(key("Tab"));
+  assert.doesNotMatch(overlay.innerHTML, /개척자 명조/);
+  assert.match(overlay.innerHTML, /장비 가방/);
 });
