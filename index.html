@@ -45,10 +45,10 @@
 
     <div id="progress" class="panel" hidden>
       <div><b id="p-marks">0</b><span>/5 맥점</span></div>
-      <div><b id="p-catalog">0</b><span>종 기록</span></div>
+      <div><b id="p-catalog">0</b><span>기록한 종</span></div>
       <div><b id="p-depth">0</b><span>최장 거리</span></div>
-      <div><b id="p-captures">0</b><span>위협 포획</span></div>
-      <div><b id="p-ink">10</b><span>남은 획</span></div>
+      <div><b id="p-captures">0</b><span>위협종 포획</span></div>
+      <div><b id="p-ink">10</b><span>획 조각</span></div>
     </div>
 
     <div id="map-panel" class="panel" hidden>
@@ -71,11 +71,12 @@
           <span><i class="k">닫아서</i> 물길</span>
           <span><i class="k">여러 획</i> 포획</span>
         </div>
-        <div id="draw-budget" class="draw-budget">획을 그릴 때마다 수집한 획 조각 1개를 사용한다</div>
+        <div id="draw-budget" class="draw-budget">획 하나를 그릴 때마다 획 조각 1개를 사용합니다.</div>
         <div class="draw-keys">
           <button data-act="confirm">제작 <kbd>Enter</kbd></button>
-          <button data-act="clear">다시 그리기 <kbd>Backspace</kbd></button>
-          <button data-act="cancel">접기 <kbd>Esc</kbd></button>
+          <button data-act="delete-toggle">획 지우기</button>
+          <button data-act="clear">모두 지우기 <kbd>Backspace</kbd></button>
+          <button data-act="cancel">닫기 <kbd>Esc</kbd></button>
         </div>
       </div>
     </div>
