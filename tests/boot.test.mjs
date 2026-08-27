@@ -36,11 +36,21 @@ const getEl = id => {
 
 const store = new Map();
 let frameCb = null;
+let deleteButtonMock = null;
 
 globalThis.document = {
   getElementById: getEl,
   createElement: () => makeEl(),
-  querySelectorAll: sel => (sel === ".draw-keys button" ? [makeEl(), makeEl(), makeEl()] : [])
+  querySelectorAll: sel => {
+    if (sel === ".draw-keys button") return [deleteButtonMock ?? makeEl(), makeEl(), makeEl()];
+    if (sel === '.draw-keys button[data-act="delete-toggle"]') {
+      const button = makeEl();
+      button.dataset.act = "delete-toggle";
+      deleteButtonMock = button;
+      return [button];
+    }
+    return [];
+  }
 };
 const winHandlers = new Map();
 globalThis.window = { addEventListener: (t, h) => winHandlers.set(t, h) };
@@ -122,6 +132,30 @@ test("도구를 그려 확정하면 저장에 남는다", () => {
   assert.equal(save.ink, 9, "한 획짜리 장비는 획 조각 하나를 사용한다");
 });
 
+test("지우기 모드에서 선택한 획 하나만 제거된다", () => {
+  const down = winHandlers.get("keydown");
+  down(key("KeyQ"));
+
+  const pad = getEl("pad");
+  const pd = pad._handlers.get("pointerdown");
+  const pm = pad._handlers.get("pointermove");
+  const pu = pad._handlers.get("pointerup");
+  pd(pointer(30, 40));
+  pm(pointer(120, 40));
+  pu({});
+  pd(pointer(30, 170));
+  pm(pointer(120, 170));
+  pu({});
+
+  deleteButtonMock._handlers.get("click")();
+  pd(pointer(70, 40));
+  down(key("Enter"));
+
+  const save = JSON.parse(store.get("drawn-frontier-v2"));
+  assert.equal(save.gear.hand.length, 2);
+  assert.equal(save.gear.hand[1].strokes.length, 1);
+});
+
 test("Tab 팔레트에서 신발을 그려 장착한다", () => {
   const down = winHandlers.get("keydown");
   down(key("Tab"));
@@ -144,7 +178,7 @@ test("Tab 팔레트에서 신발을 그려 장착한다", () => {
   assert.equal(save.gear.shoes.length, 1);
   assert.equal(save.equipped.shoes, save.gear.shoes[0].id);
   assert.ok(save.gear.shoes[0].shoeStats.speed > 0.4);
-  assert.equal(save.ink, 8);
+  assert.equal(save.ink, 7);
 });
 
 test("Shift 달리기는 장거리 이동하며 장착한 신발을 마모시킨다", () => {

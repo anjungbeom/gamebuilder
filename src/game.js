@@ -51,7 +51,8 @@ const el = {
   ink: document.getElementById("p-ink"),
   drawTitle: document.getElementById("draw-title-text"),
   drawLegend: document.getElementById("draw-legend"),
-  drawBudget: document.getElementById("draw-budget")
+  drawBudget: document.getElementById("draw-budget"),
+  deleteButton: Array.from(document.querySelectorAll('.draw-keys button[data-act="delete-toggle"]'))[0] ?? null
 };
 const mapCtx = el.minimap.getContext("2d");
 mapCtx.imageSmoothingEnabled = false;
@@ -93,6 +94,8 @@ let mapTimer = 0;
 let dirty = false;
 let last = 0;
 let draftSlot = "hand";
+let deleteMode = false;
+let hoverStroke = -1;
 
 const keys = new Set();
 
@@ -598,6 +601,8 @@ function openDraw(slot = "hand") {
   strokes = [];
   current = null;
   drawing = false;
+  deleteMode = false;
+  hoverStroke = -1;
   mode = "draw";
   el.drawLayer.hidden = false;
   el.toolPanel.classList.add("live");
@@ -605,30 +610,76 @@ function openDraw(slot = "hand") {
   el.drawLegend.innerHTML = slot === "shoes"
     ? `<span><i class="k">길게</i> 질주</span><span><i class="k">둥글게</i> 안정</span><span><i class="k">촘촘히</i> 수명</span><span><i class="k">적은 획</i> 절약</span>`
     : `<span><i class="k">뾰족하게</i> 바위</span><span><i class="k">길게</i> 거리</span><span><i class="k">닫아서</i> 물길</span><span><i class="k">여러 획</i> 포획</span>`;
+  updateDeleteButton();
   renderPad();
   updateHud();
 }
 
 function closeDraw() {
+  deleteMode = false;
+  hoverStroke = -1;
   mode = "play";
   el.drawLayer.hidden = true;
   el.toolPanel.classList.remove("live");
   updateHud();
 }
 
+function updateDeleteButton() {
+  if (!el.deleteButton) return;
+  el.deleteButton.classList.toggle("active", deleteMode);
+  el.deleteButton.textContent = deleteMode ? "그리기 모드" : "획 지우기";
+  el.deleteButton.setAttribute?.("aria-pressed", String(deleteMode));
+  pad.classList.toggle("delete-mode", deleteMode);
+}
+
+function pointToSegmentDistance(point, a, b) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lengthSq = dx * dx + dy * dy;
+  if (lengthSq === 0) return Math.hypot(point.x - a.x, point.y - a.y);
+  const t = clamp(((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSq, 0, 1);
+  return Math.hypot(point.x - (a.x + t * dx), point.y - (a.y + t * dy));
+}
+
+function strokeAt(point) {
+  let best = -1;
+  let bestDistance = 11;
+  for (let i = strokes.length - 1; i >= 0; i--) {
+    const stroke = strokes[i];
+    for (let j = 1; j < stroke.length; j++) {
+      const distance = pointToSegmentDistance(point, stroke[j - 1], stroke[j]);
+      if (distance < bestDistance) {
+        best = i;
+        bestDistance = distance;
+      }
+    }
+  }
+  return best;
+}
+
+function removeStrokeAt(point) {
+  const index = strokeAt(point);
+  if (index < 0) return false;
+  strokes.splice(index, 1);
+  hoverStroke = -1;
+  renderPad();
+  updateHud();
+  return true;
+}
+
 function confirmDraw() {
   const cost = strokes.filter(s => s.length >= 2).length;
   if (cost > game.ink) {
-    toast(`획 조각이 모자란다 — 필요 ${cost} / 보유 ${game.ink}`, "bad");
+    toast(`획 조각이 부족해 — 필요 ${cost} / 보유 ${game.ink}`, "bad");
     return;
   }
   if (totalGear() >= game.maxGear) {
-    toast(`장비 가방이 가득 찼다 — Tab에서 장비를 정리하자`, "bad");
+    toast(`장비 가방이 가득 찼어 — Tab에서 장비를 정리하자`, "bad");
     return;
   }
   const gear = buildGear(strokes, draftSlot);
   if (!gear) {
-    toast("형태가 너무 짧다 — 획을 조금 더 이어 보자", "bad");
+    toast("획이 너무 짧아 — 조금 더 길게 그려 보자", "bad");
     return;
   }
   game.ink -= cost;
@@ -651,6 +702,10 @@ function padPoint(e) {
 pad.addEventListener("pointerdown", e => {
   if (mode !== "draw") return;
   e.preventDefault();
+  if (deleteMode) {
+    removeStrokeAt(padPoint(e));
+    return;
+  }
   pad.setPointerCapture?.(e.pointerId);
   drawing = true;
   current = [padPoint(e)];
@@ -660,8 +715,17 @@ pad.addEventListener("pointerdown", e => {
 });
 
 pad.addEventListener("pointermove", e => {
-  if (mode !== "draw" || !drawing || !current) return;
+  if (mode !== "draw") return;
   e.preventDefault();
+  if (deleteMode) {
+    const nextHover = strokeAt(padPoint(e));
+    if (nextHover !== hoverStroke) {
+      hoverStroke = nextHover;
+      renderPad();
+    }
+    return;
+  }
+  if (!drawing || !current) return;
   const p = padPoint(e);
   const tail = current[current.length - 1];
   if (Math.hypot(p.x - tail.x, p.y - tail.y) < 1.5) return;
@@ -706,7 +770,9 @@ function renderPad() {
   padCtx.lineWidth = 4;
   padCtx.lineCap = "round";
   padCtx.lineJoin = "round";
-  for (const s of strokes) {
+  for (let strokeIndex = 0; strokeIndex < strokes.length; strokeIndex++) {
+    const s = strokes[strokeIndex];
+    padCtx.strokeStyle = strokeIndex === hoverStroke ? "#d85b51" : "#1b2634";
     if (s.length < 2) {
       if (s.length === 1) {
         padCtx.fillStyle = "#1b2634";
@@ -725,7 +791,21 @@ document.querySelectorAll(".draw-keys button").forEach(btn => {
   btn.addEventListener("click", () => {
     const act = btn.dataset.act;
     if (act === "confirm") confirmDraw();
-    else if (act === "clear") { strokes = []; current = null; renderPad(); updateHud(); }
+    else if (act === "delete-toggle") {
+      deleteMode = !deleteMode;
+      current = null;
+      drawing = false;
+      hoverStroke = -1;
+      updateDeleteButton();
+      renderPad();
+      updateHud();
+    } else if (act === "clear") {
+      strokes = [];
+      current = null;
+      hoverStroke = -1;
+      renderPad();
+      updateHud();
+    }
     else closeDraw();
   });
 });
@@ -780,7 +860,9 @@ function updateHud() {
     el.toolDura.textContent = d > 0 ? `사용 ${d}회` : "";
     el.toolDura.classList.remove("low");
     const cost = strokes.filter(s => s.length >= 2).length;
-    el.drawBudget.textContent = `이번 설계 ${cost}획 · 보유 ${game.ink}획`;
+    el.drawBudget.textContent = deleteMode
+      ? `지울 획을 클릭하세요 · 현재 ${cost}획 · 보유 ${game.ink}획`
+      : `이번 설계 ${cost}획 · 보유 ${game.ink}획`;
   } else if (game.tool) {
     el.toolName.textContent = game.tool.name;
     el.toolDura.textContent = `사용 ${game.tool.durability}/${game.tool.maxDurability}`;
@@ -1113,7 +1195,13 @@ window.addEventListener("keydown", e => {
   if (mode === "draw") {
     if (e.code === "Enter") confirmDraw();
     else if (e.code === "Escape") closeDraw();
-    else if (e.code === "Backspace") { strokes = []; current = null; renderPad(); updateHud(); }
+    else if (e.code === "Backspace") {
+      strokes = [];
+      current = null;
+      hoverStroke = -1;
+      renderPad();
+      updateHud();
+    }
     return;
   }
 

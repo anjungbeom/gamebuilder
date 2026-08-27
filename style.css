@@ -238,6 +238,7 @@ html, body {
   touch-action: none;
   display: block;
 }
+#pad.delete-mode { cursor: crosshair; }
 .draw-legend {
   display: flex;
   justify-content: center;
@@ -261,6 +262,7 @@ html, body {
   cursor: pointer;
 }
 .draw-keys button:hover { background: rgba(255, 255, 255, 0.15); }
+.draw-keys button.active { border-color: rgba(255, 123, 107, 0.75); background: rgba(255, 123, 107, 0.16); color: #ffc4bb; }
 kbd {
   color: var(--dim);
   font-size: 0.82em;
