@@ -37,14 +37,7 @@ export function drawTerrain(ctx, camX, camY, viewW, viewH, seed, cleared, foundC
       const sx = Math.round(tx * TILE - camX);
       const sy = Math.round(ty * TILE - camY);
 
-      if (regionRequiredMarksAt(tx, ty) > foundCount) {
-        const cloud = hashUnit(tx, ty, seed + Math.floor(time / 900));
-        ctx.fillStyle = cloud > .52 ? "#111b27" : "#0c1520";
-        ctx.fillRect(sx, sy, TILE, TILE);
-        ctx.fillStyle = `rgba(165,184,197,${(.06 + cloud * .1).toFixed(3)})`;
-        ctx.fillRect(sx + Math.floor(cloud * 5), sy + 4, 10, 5);
-        continue;
-      }
+      const locked = regionRequiredMarksAt(tx, ty) > foundCount;
 
       ctx.fillStyle = tileColor(tx, ty, seed);
       ctx.fillRect(sx, sy, TILE, TILE);
@@ -58,8 +51,27 @@ export function drawTerrain(ctx, camX, camY, viewW, viewH, seed, cleared, foundC
       if (obstacle && !cleared.has(`${tx},${ty}`)) {
         drawObstacle(ctx, sx, sy, obstacle, tx, ty, seed);
       }
+      if (locked) drawMovingFog(ctx, sx, sy, tx, ty, seed, time);
     }
   }
+}
+
+function drawMovingFog(ctx, sx, sy, tx, ty, seed, time) {
+  const density = hashUnit(tx, ty, seed + 45011);
+  const wave = Math.sin(time * .0018 + tx * .37 + ty * .19) * .5 + .5;
+  // 잠긴 지형의 정보는 남기고, 흐르는 안개만 시야를 부드럽게 가린다.
+  ctx.fillStyle = `rgba(38,54,66,${(.21 + density * .10).toFixed(3)})`;
+  ctx.fillRect(sx, sy, TILE, TILE);
+
+  // 시간값을 색 해시에 넣지 않고 위치만 이동시켜 안개가 깜빡이지 않고 흐른다.
+  const driftX = Math.round(((time * .020 + tx * 5 + density * 17) % 34) - 17);
+  const driftY = Math.round(Math.sin(time * .0013 + ty * .7) * 4);
+  ctx.fillStyle = `rgba(218,232,236,${(.08 + wave * .10).toFixed(3)})`;
+  ctx.fillRect(sx + driftX, sy + 2 + driftY, 25, 4);
+  ctx.fillRect(sx - driftX * .48 - 9, sy + 9 - driftY, 23, 4);
+  ctx.fillStyle = `rgba(242,248,247,${(.035 + wave * .045).toFixed(3)})`;
+  ctx.fillRect(sx + driftX * .32, sy + 6, 15, 2);
+  ctx.fillRect(sx - driftX * .22 - 5, sy + 14, 18, 2);
 }
 
 function drawRipple(ctx, sx, sy, tx, ty, seed) {
@@ -224,12 +236,28 @@ export function drawLandmark(ctx, sx, sy, found, time) {
 export function drawCreature(ctx, creature, sx, sy, time) {
   const g = creature.genome;
   const parts = bodyPlan(g);
-  const dir = creature.facing >= 0 ? 1 : -1;
+  const dir = (creature.assetFacing ?? creature.facing) >= 0 ? 1 : -1;
+  const turning = !!creature.turning;
   const bob = Math.sin(time / 180 + creature.phase) * 0.8;
+  const attackState = creature.attackState ?? "idle";
+  const attackPulse = .5 + Math.sin(time / 52 + creature.phase) * .5;
+  if (attackState === "lunge") sx += dir * 2;
 
   const body = `hsl(${g.hue.toFixed(0)},${g.sat.toFixed(0)}%,${g.light.toFixed(0)}%)`;
   const dark = `hsl(${g.hue.toFixed(0)},${g.sat.toFixed(0)}%,${Math.max(14, g.light - 20).toFixed(0)}%)`;
   const lightC = `hsl(${g.hue.toFixed(0)},${g.sat.toFixed(0)}%,${Math.min(88, g.light + 18).toFixed(0)}%)`;
+
+  if (creature.hostile && ["tell", "shoot-tell", "slam-tell", "bite-tell"].includes(attackState)) {
+    const rangedTell = attackState === "shoot-tell";
+    const slamTell = attackState === "slam-tell";
+    ctx.strokeStyle = rangedTell ? `rgba(255,176,107,${(.38 + attackPulse * .38).toFixed(3)})` : slamTell ? `rgba(255,209,102,${(.38 + attackPulse * .42).toFixed(3)})` : `rgba(255,97,93,${(.34 + attackPulse * .42).toFixed(3)})`;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(sx, sy + 1, g.bodyRadius * 2.7 + 5 + Math.round(attackPulse * 2), 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = rangedTell ? "#ffb06b" : slamTell ? "#ffd166" : "#ff615d";
+    ctx.fillRect(sx - 1, sy - g.bodyRadius - 18, 3, 3);
+  }
 
   if (creature.bossParts) {
     for (const part of creature.bossParts) {
@@ -281,6 +309,35 @@ export function drawCreature(ctx, creature, sx, sy, time) {
     ctx.fillRect(sx - 7, sy - g.bodyRadius - 18, 14, 2);
     ctx.fillRect(sx - 5, sy - g.bodyRadius - 21, 3, 3);
     ctx.fillRect(sx + 2, sy - g.bodyRadius - 21, 3, 3);
+
+    // 보스 전용 도트 프레임: 공격 종류가 실루엣만으로 읽힌다.
+    const arm = Math.max(8, Math.round(g.bodyRadius * 1.25));
+    if (attackState === "slam-tell") {
+      ctx.fillStyle = lightC;
+      ctx.fillRect(sx + dir * 4, sy - arm - 7, dir * arm, 3);
+      ctx.fillRect(sx + dir * (arm + 2), sy - arm - 10, dir * 4, 7);
+      ctx.fillStyle = "#fff0a8";
+      ctx.fillRect(sx + dir * (arm + 4), sy - arm - 11, 3, 3);
+    } else if (attackState === "slam") {
+      ctx.fillStyle = dark;
+      ctx.fillRect(sx + dir * 4, sy + 2, dir * (arm + 5), 4);
+      ctx.fillStyle = "#ffd166";
+      ctx.fillRect(sx + dir * (arm + 8), sy + 4, dir * 7, 2);
+      ctx.fillRect(sx - 12, sy + g.bodyRadius + 4, 24, 2);
+    } else if (attackState === "bite-tell" || attackState === "lunge") {
+      const mouthX = sx + dir * (g.bodyRadius + 4);
+      ctx.fillStyle = "#101418";
+      ctx.fillRect(mouthX, sy - 3, dir * (g.bodyRadius + 5), 7);
+      ctx.fillStyle = "#fff4bd";
+      ctx.fillRect(mouthX + dir * 2, sy - 3, dir * 2, 3);
+      ctx.fillRect(mouthX + dir * (g.bodyRadius + 1), sy + 2, dir * 2, 3);
+    } else if (attackState === "shoot-tell") {
+      const mouthX = sx + dir * (g.bodyRadius + 3);
+      ctx.fillStyle = "#101418";
+      ctx.fillRect(mouthX, sy - 3, dir * 7, 7);
+      ctx.fillStyle = `rgba(255,176,107,${(.55 + attackPulse * .35).toFixed(3)})`;
+      ctx.fillRect(mouthX + dir * 2, sy - 1, dir * 6, 3);
+    }
   }
 
   if (creature.hostile && Number.isFinite(creature.hp)) {
@@ -326,20 +383,51 @@ export function drawCreature(ctx, creature, sx, sy, time) {
 
   // 다리
   ctx.fillStyle = dark;
-  for (let i = 0; i < g.legPairs; i++) {
-    const lx = sx + dir * (parts[Math.min(i, parts.length - 1)].offset * -0.6);
+  if (g.upright) {
+    const footY = sy + g.bodyRadius * 2.45;
+    const swing = Math.sin(time / 120 + creature.phase) * (creature.moving ? 2 : .3);
+    ctx.fillRect(Math.round(sx - g.bodyRadius * .55 + swing), Math.round(footY), 3, 6);
+    ctx.fillRect(Math.round(sx + g.bodyRadius * .3 - swing), Math.round(footY), 3, 6);
+  } else for (let i = 0; i < g.legPairs; i++) {
+    const part = parts[Math.min(i, parts.length - 1)];
+    const lx = sx + dir * (part.offset * -0.6);
     const swing = Math.sin(time / 120 + creature.phase + i) * 1.4 * (creature.moving ? 1 : 0.2);
-    ctx.fillRect(Math.round(lx - 1 + swing), Math.round(sy + g.bodyRadius - 1), 2, 4);
+    ctx.fillRect(Math.round(lx - 1 + swing), Math.round(sy + (part.yOffset ?? 0) + g.bodyRadius - 1), 2, 4);
+  }
+
+  // 직립형·다완형·거구형은 몸통과 분리된 팔 실루엣을 가진다.
+  if ((g.armPairs ?? 0) > 0 && attackState === "idle") {
+    ctx.fillStyle = dark;
+    for (let i = 0; i < g.armPairs; i++) {
+      const armY = sy + g.bodyRadius * (.72 + i * .42);
+      const reach = Math.round(g.bodyRadius * (g.form === "armed" ? 1.7 : 1.25));
+      ctx.fillRect(Math.round(sx - reach - 2), Math.round(armY), reach, 3);
+      ctx.fillRect(Math.round(sx + 2), Math.round(armY), reach, 3);
+      ctx.fillStyle = lightC;
+      ctx.fillRect(Math.round(sx - reach - 3), Math.round(armY + 2), 3, 3);
+      ctx.fillRect(Math.round(sx + reach), Math.round(armY + 2), 3, 3);
+      ctx.fillStyle = dark;
+    }
+  }
+
+  if (creature.hostile && attackState !== "idle") {
+    ctx.fillStyle = ["lunge", "bite-tell"].includes(attackState) ? "#fff0a8" : dark;
+    const armX = sx + dir * (g.bodyRadius + 2);
+    ctx.fillRect(Math.round(armX), Math.round(sy - 1), dir * 3, 2);
+    if (attackState === "lunge") ctx.fillRect(Math.round(armX + dir * 3), Math.round(sy - 2), dir * 3, 1);
   }
 
   // 몸통 마디 (뒤에서 앞으로)
   for (let i = parts.length - 1; i >= 0; i--) {
     const p = parts[i];
     const px = Math.round(sx + dir * p.offset);
-    const py = Math.round(sy + bob);
+    const py = Math.round(sy + bob + (p.yOffset ?? 0));
     const r = Math.max(1, Math.round(p.radius));
     ctx.fillStyle = i === 0 ? lightC : body;
-    ctx.fillRect(px - r, py - r, r * 2, r * 2);
+    if (g.form === "orb") {
+      ctx.fillRect(px - r + 2, py - r, r * 2 - 4, r * 2);
+      ctx.fillRect(px - r, py - r + 2, r * 2, r * 2 - 4);
+    } else ctx.fillRect(px - r, py - r, r * 2, r * 2);
     ctx.fillStyle = dark;
     ctx.fillRect(px - r, py + r - 1, r * 2, 1);
   }
@@ -399,7 +487,13 @@ export function drawCreature(ctx, creature, sx, sy, time) {
   }
 
   ctx.fillStyle = "#101418";
-  if (g.eyes === 1) {
+  if (turning) {
+    // 방향 전환 중에는 정면을 본 중립 프레임으로 바꿔 순간 반전을 숨긴다.
+    ctx.fillRect(headX - 2, headY - 1, 1, 2);
+    ctx.fillRect(headX + 1, headY - 1, 1, 2);
+    ctx.fillStyle = lightC;
+    ctx.fillRect(headX - 1, headY + 2, 3, 1);
+  } else if (g.eyes === 1) {
     ctx.fillRect(headX + dir * 1, headY - 1, 2, 2);
   } else {
     ctx.fillRect(headX + dir * 1, headY - 2, 2, 2);
@@ -461,7 +555,7 @@ function drawWeaknessMark(ctx, x, y, weakness) {
   }
 }
 
-export function drawPlayer(ctx, sx, sy, faceX, faceY, walking, time, afloat, running = false, shoes = null, hurt = 0, deathProgress = 0) {
+export function drawPlayer(ctx, sx, sy, faceX, faceY, walking, time, afloat, running = false, shoes = null, hurt = 0, deathProgress = 0, bindTimer = 0, dodgeTimer = 0) {
   if (deathProgress > 0) {
     ctx.save();
     ctx.translate(Math.round(sx), Math.round(sy) + Math.round(deathProgress * 6));
@@ -477,6 +571,12 @@ export function drawPlayer(ctx, sx, sy, faceX, faceY, walking, time, afloat, run
   const front = faceY > 0;
   const back = faceY < 0;
   const dir = faceX < 0 ? -1 : 1;
+
+  if (dodgeTimer > 0) {
+    ctx.fillStyle = "rgba(185,232,255,.50)";
+    ctx.fillRect(x - faceX * 10 - 3, y - faceY * 7 - 4, 5, 10);
+    ctx.fillRect(x - faceX * 15 - 2, y - faceY * 9 - 2, 3, 7);
+  }
 
   if (running) {
     ctx.fillStyle = "rgba(218,244,255,0.48)";
@@ -544,6 +644,13 @@ export function drawPlayer(ctx, sx, sy, faceX, faceY, walking, time, afloat, run
   } else {
     ctx.fillRect(x - 4, y - 5, 9, 1);
     ctx.fillRect(x + (front ? 3 : -5), y - 4, 3, 2);
+  }
+  if (bindTimer > 0) {
+    ctx.fillStyle = "rgba(150,219,255,.82)";
+    ctx.fillRect(x - 6, y - 1, 12, 1);
+    ctx.fillRect(x - 5, y + 3, 10, 1);
+    ctx.fillRect(x - 6, y - 1, 1, 5);
+    ctx.fillRect(x + 5, y - 1, 1, 5);
   }
   if (deathProgress > 0) ctx.restore();
 }

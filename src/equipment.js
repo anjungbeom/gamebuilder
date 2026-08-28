@@ -7,6 +7,27 @@ const TYPES = {
   grip: { key: "snare", label: "포획형", bonus: "포획력 +12% · 제압 강화" }
 };
 
+// 성능값을 자르지 않는다. 대신 한 설계에서 사용할 수 있는 총 선 길이를
+// 숙련도에 맞춰 늘려, 같은 총량 안에서 어떤 형태에 길이를 배분할지 선택하게 한다.
+export const MILESTONE_LENGTH_BUDGETS = [
+  { budget: 520, label: "입문" },
+  { budget: 650, label: "탐사" },
+  { budget: 800, label: "숙련" },
+  { budget: 980, label: "정예" },
+  { budget: 1200, label: "개척" }
+];
+
+export function milestoneLengthBudget(milestone = 0) {
+  const index = clamp(Math.floor(milestone), 0, MILESTONE_LENGTH_BUDGETS.length - 1);
+  return { ...MILESTONE_LENGTH_BUDGETS[index], index };
+}
+
+export function drawingLengthState(raw, milestone = 0) {
+  const level = milestoneLengthBudget(milestone);
+  const used = Math.max(0, raw.inkPx ?? 0);
+  return { ...level, used, remaining: Math.max(0, level.budget - used), exceeded: used > level.budget + .5 };
+}
+
 export function handToolProfile(raw) {
   const ordered = ["edge", "reach", "buoy", "grip"].sort((a, b) => raw[b] - raw[a]);
   const balanced = raw[ordered[0]] - raw[ordered[1]] < .08;

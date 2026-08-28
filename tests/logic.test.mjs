@@ -7,13 +7,16 @@ import {
   villagePositions
 } from "../src/world.js";
 import { buildGenome, bodyPlan } from "../src/creature.js";
+import { drawCreature } from "../src/render.js";
 import {
   creatureMaxHp, bossWeakness, attackDamage, captureThresholdAtHp,
-  inAttackArc, parryDisarmDuration, directionalWeaknessAllows
+  inAttackArc, parryDisarmDuration, directionalWeaknessAllows,
+  creatureAttackProfile, parryTiming, dodgeTiming
 } from "../src/combat.js";
 import { creatureRewardProfile, scoreCreatureActions, scoreVillagerActions, scorePetActions, selectRewardAction } from "../src/behavior.js";
 import { challengeRows, nextChallenge } from "../src/challenges.js";
-import { handToolProfile, petToolStats } from "../src/equipment.js";
+import { handToolProfile, petToolStats, drawingLengthState, milestoneLengthBudget } from "../src/equipment.js";
+import { DEFAULT_KEYMAP, normalizePreferences, rebindKey, actionForCode, keyLabel } from "../src/settings.js";
 import { environmentAt, thermalState, noiseLabel, DAY_DISTANCE } from "../src/environment.js";
 import {
   tierForFragments, progressionEffects, craftingCost, dropChance, rollInteractionReward
@@ -145,6 +148,18 @@ test("크리처는 물이나 바위에 생기지 않는다", () => {
   assert.ok(found > 10, `found=${found}`);
 });
 
+test("크리처는 다족·장체·구체·직립·다완·거구 실루엣으로 분화된다", () => {
+  const forms = new Set();
+  for (let seed = 1; seed <= 240; seed++) forms.add(buildGenome(seed * 7919, "forest", 3).form);
+  for (const expected of ["longbody", "orb", "biped", "armed", "brute", "serpent"]) {
+    assert.ok(forms.has(expected), `${expected} 형태가 생성되어야 한다`);
+  }
+  const upright = Array.from({ length: 200 }, (_, i) => buildGenome(i * 3571 + 9, "plain", 4)).find(g => g.upright);
+  assert.ok(upright && upright.armPairs > 0);
+  assert.equal(bodyPlan(upright)[1].offset, 0, "직립형 몸통은 수평 마디로 늘어나지 않는다");
+  assert.ok(bodyPlan(upright)[1].yOffset > 0);
+});
+
 test("거리별 맵 단위가 초원·사막·숲·습지·고원 순서로 열린다", () => {
   const probes = [0, 31, 53, 81, 113];
   assert.deepEqual(probes.map(x => frontierRegionAt(x, 0).index), [0, 1, 2, 3, 4]);
@@ -211,6 +226,26 @@ test("비슷한 두 핵심 성능을 가진 손도구는 균형형 보너스를 
   assert.ok(hand.stats.edge > raw.edge && hand.stats.reach > raw.reach);
 });
 
+test("장비 성능값은 자르지 않고 마일스톤이 총 그리기 길이만 확장한다", () => {
+  const raw = { edge: .96, reach: .35, buoy: .16, grip: .24, ink: .7, inkPx: 600, strokeCount: 2 };
+  const starter = drawingLengthState(raw, 0);
+  const veteran = drawingLengthState(raw, 3);
+  assert.equal(starter.exceeded, true);
+  assert.equal(veteran.exceeded, false);
+  assert.equal(starter.used, raw.inkPx);
+  assert.ok(milestoneLengthBudget(4).budget > milestoneLengthBudget(0).budget);
+  assert.equal(raw.edge, .96, "길이 예산은 성능 분포를 변형하지 않는다");
+});
+
+test("키 재설정은 충돌 키를 교환하고 설정값을 안전하게 정규화한다", () => {
+  const changed = rebindKey(DEFAULT_KEYMAP, "parry", "Space");
+  assert.equal(changed.parry, "Space");
+  assert.equal(changed.attack, "KeyP");
+  assert.equal(actionForCode(changed, "Space"), "parry");
+  assert.equal(keyLabel("KeyK"), "K");
+  assert.equal(normalizePreferences({ animation: "limited" }).animation, "limited");
+});
+
 test("각 신호기에는 육지 우두머리가 있고 마지막 개체만 영역 지배자다", () => {
   for (let seed = 1; seed <= 12; seed++) {
     const bosses = bossPositions(seed * 3571);
@@ -237,6 +272,37 @@ test("공격은 바라보는 방향의 범위 안에서만 맞고 패링은 일�
   assert.equal(inAttackArc(-8, 0, 1, 0, 24, 3), false);
   assert.equal(inAttackArc(40, 0, 1, 0, 24, 3), false);
   assert.ok(parryDisarmDuration("normal") > parryDisarmDuration("midboss"));
+});
+
+test("모든 적은 공통 예고-공격-회복 프로필을 쓰고 패링·회피 창은 제한된다", () => {
+  const normal = creatureAttackProfile("normal", false);
+  const boss = creatureAttackProfile("fieldboss", false);
+  const ranged = creatureAttackProfile("normal", true);
+  const rangedBoss = creatureAttackProfile("fieldboss", true);
+  const late = creatureAttackProfile("normal", false, 4);
+  assert.ok(normal.tell > 0 && normal.lunge > 0 && normal.recover > 0);
+  assert.ok(boss.speed > normal.speed && boss.bind > normal.bind);
+  assert.equal(ranged.lunge, 0);
+  assert.ok(rangedBoss.lunge > 0 && rangedBoss.slam > 0, "보스는 원거리형이어도 물기와 내려찍기 프레임을 가진다");
+  assert.ok(late.tell < normal.tell && late.speed > normal.speed && late.bind > normal.bind, "후반 지역은 공격이 더 빠르고 강하다");
+  assert.ok(parryTiming(0).window < .2, "패링은 긴 선입력이 아닌 짧은 타이밍 창이어야 한다");
+  assert.ok(parryTiming(1).cooldown < parryTiming(0).cooldown);
+  assert.ok(dodgeTiming().window > 0 && dodgeTiming().wireLink > dodgeTiming().window);
+});
+
+test("보스는 내려찍기·물기·사격 준비의 별도 도트 프레임을 안전하게 그린다", () => {
+  const ctx = new Proxy({}, {
+    get: (_target, key) => key === "canvas" ? { width: 384, height: 216 } : () => {},
+    set: () => true
+  });
+  const genome = buildGenome(9182, "forest");
+  for (const attackState of ["slam-tell", "slam", "bite-tell", "lunge", "shoot-tell"]) {
+    assert.doesNotThrow(() => drawCreature(ctx, {
+      genome, hostile: true, ranged: true, rank: "fieldboss", hp: 12, maxHp: 12,
+      assetFacing: -1, facing: 1, turning: true, attackState, phase: 0,
+      bossParts: []
+    }, 120, 90, 350));
+  }
 });
 
 test("낮밤과 날씨는 이동 거리와 시드로 결정되고 체온·소음 상태가 구분된다", () => {
