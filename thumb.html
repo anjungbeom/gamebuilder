@@ -1,41 +1,223 @@
-<!doctype html><html lang="ko"><head><meta charset="utf-8"><style>
-*{margin:0;padding:0;box-sizing:border-box}
-html,body{width:1920px;height:1080px;overflow:hidden;background:#070b12;
-  font-family:"Pretendard","Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif;color:#eaf2ff}
-#wrap{position:relative;width:1920px;height:1080px}
-iframe{position:absolute;inset:0;width:1920px;height:1080px;border:0}
-#shade{position:absolute;inset:0;background:
-  linear-gradient(105deg,rgba(5,9,16,.94) 0%,rgba(5,9,16,.82) 34%,rgba(5,9,16,.12) 62%,rgba(5,9,16,.4) 100%)}
-#txt{position:absolute;left:104px;top:50%;transform:translateY(-50%);width:880px}
-h1{font-size:112px;letter-spacing:-.035em;line-height:.95;font-weight:800}
-.sub{margin-top:26px;font-size:40px;font-weight:700;color:#7fd0ff;letter-spacing:-.02em}
-.desc{margin-top:20px;font-size:26px;line-height:1.65;color:#9fb0c8}
-.row{margin-top:40px;display:flex;gap:12px;flex-wrap:wrap}
-.chip{font-size:23px;font-weight:700;padding:11px 20px;border-radius:99px;
-  background:rgba(255,255,255,.07);border:1px solid rgba(150,180,220,.28)}
-.c1{color:#ff7b6b}.c2{color:#7fd0ff}.c3{color:#7ee0c0}.c4{color:#ffd166}
-#sketch{position:absolute;right:150px;top:172px;opacity:.95}
-.cap{position:absolute;right:150px;top:112px;font-size:24px;color:#cfe0f4;
-  text-align:right;width:520px;font-weight:700}
-</style></head><body><div id="wrap">
-<iframe src="index.html?seed=97"></iframe>
-<div id="shade"></div>
-<div class="cap">막힌 길을 보고 → 필요한 형질을 직접 설계</div>
-<svg id="sketch" width="520" height="220" viewBox="0 0 520 220">
-  <polyline points="20,190 250,26 480,190" fill="none" stroke="#0d1420"
-    stroke-width="17" stroke-linecap="round" stroke-linejoin="round"/>
-  <polyline points="20,190 250,26 480,190" fill="none" stroke="#ff7b6b"
-    stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="250" cy="26" r="15" fill="none" stroke="#ff7b6b" stroke-width="3" opacity=".65"/>
-</svg>
-<div id="txt">
-  <h1>Drawn<br>Frontier</h1>
-  <div class="sub">길이 없으면, 그려서 연다</div>
-  <p class="desc">다섯 지역의 신호기를 켜고 크리처를 모으며<br>끝없이 이어지는 세계를 탐사한다.</p>
-  <div class="row">
-    <span class="chip c1">뾰족하게 · 파쇄력</span>
-    <span class="chip c2">길게 · 사거리</span>
-    <span class="chip c3">닫아서 · 부력</span>
-    <span class="chip c4">여러 획 · 포획력</span>
-  </div>
-</div></div></body></html>
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Drawn Frontier Thumbnail</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+  background: #bfeaff;
+  color: #263752;
+  font-family: "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
+}
+#wrap { position: relative; width: 1920px; height: 1080px; overflow: hidden; }
+iframe {
+  position: absolute;
+  inset: -36px;
+  width: 1992px;
+  height: 1152px;
+  border: 0;
+  filter: brightness(1.42) saturate(.9) contrast(.9);
+  pointer-events: none;
+}
+.wash {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(191,234,255,.98) 0 8%, rgba(191,234,255,.36) 56%, rgba(255,244,199,.12) 100%),
+    repeating-linear-gradient(0deg, rgba(255,255,255,.11) 0 2px, transparent 2px 18px);
+}
+.blob { position: absolute; border: 5px solid #33415c; image-rendering: pixelated; }
+.blob.a { left: -42px; top: -38px; width: 330px; height: 210px; background: #ffd65a; transform: rotate(-8deg); }
+.blob.b { right: -35px; bottom: -42px; width: 340px; height: 260px; background: #8ce5c2; transform: rotate(7deg); }
+.blob.c { right: 170px; top: -82px; width: 220px; height: 170px; background: #ff8b7b; transform: rotate(-4deg); }
+
+.paper {
+  position: absolute;
+  left: 72px;
+  top: 70px;
+  width: 880px;
+  height: 916px;
+  padding: 68px 66px 54px;
+  background:
+    linear-gradient(rgba(78,112,154,.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(78,112,154,.07) 1px, transparent 1px),
+    #fffdf4;
+  background-size: 26px 26px;
+  border: 6px solid #33415c;
+  box-shadow: 15px 15px 0 #ffd65a, 29px 29px 0 #ff8b7b;
+  transform: rotate(-.65deg);
+}
+.eyebrow {
+  display: inline-block;
+  padding: 9px 15px 8px;
+  background: #e9fff5;
+  border: 3px solid #159f78;
+  color: #08775a;
+  font-size: 24px;
+  font-weight: 900;
+  letter-spacing: .12em;
+}
+h1 {
+  position: relative;
+  z-index: 1;
+  margin-top: 34px;
+  font-size: 105px;
+  font-weight: 950;
+  letter-spacing: -.055em;
+  line-height: .91;
+  color: #243044;
+}
+h1::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  left: -8px;
+  bottom: 7px;
+  width: 720px;
+  height: 27px;
+  background: repeating-linear-gradient(0deg, #ffd65a 0 6px, #f4b943 6px 9px, transparent 9px 12px);
+  transform: rotate(-1deg);
+}
+.pitch {
+  margin-top: 34px;
+  max-width: 720px;
+  color: #a34a45;
+  font-size: 39px;
+  font-weight: 950;
+  line-height: 1.28;
+  letter-spacing: -.035em;
+}
+.pitch b { color: #177bbb; }
+.rules {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-top: 36px;
+}
+.rule {
+  display: grid;
+  grid-template-columns: 58px 1fr;
+  align-items: center;
+  min-height: 82px;
+  padding: 12px 14px;
+  background: #fff;
+  border: 3px solid #33415c;
+  box-shadow: 5px 5px 0 rgba(51,65,92,.18);
+  font-size: 22px;
+  font-weight: 900;
+}
+.rule i {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border: 3px solid currentColor;
+  font: 950 28px/1 ui-monospace, monospace;
+  font-style: normal;
+}
+.rule small { display: block; margin-top: 2px; color: #68758a; font-size: 16px; font-weight: 750; }
+.r1 { color: #d9534f; background: #fff2ef; }
+.r2 { color: #177bbb; background: #eef9ff; }
+.r3 { color: #08775a; background: #effff7; }
+.r4 { color: #a26b00; background: #fff9de; }
+.goal {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 34px;
+  color: #243044;
+  font-size: 26px;
+  font-weight: 950;
+}
+.goal span {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  background: #ffd65a;
+  border: 3px solid #33415c;
+  transform: rotate(45deg);
+}
+.goal span::after { content: "✓"; transform: rotate(-45deg); }
+
+.sketch-card {
+  position: absolute;
+  right: 80px;
+  top: 94px;
+  width: 790px;
+  height: 314px;
+  padding: 28px 34px;
+  background: rgba(255,253,244,.94);
+  border: 6px solid #33415c;
+  box-shadow: 12px 12px 0 #7fd0ff;
+  transform: rotate(1.2deg);
+}
+.sketch-card h2 { font-size: 25px; font-weight: 950; color: #526074; letter-spacing: .06em; }
+.sketch-card svg { display: block; width: 100%; height: 214px; margin-top: 8px; }
+.arrow {
+  position: absolute;
+  right: 610px;
+  top: 420px;
+  width: 140px;
+  color: #fffdf4;
+  filter: drop-shadow(3px 3px 0 #33415c);
+  font-size: 86px;
+  font-weight: 950;
+  transform: rotate(22deg);
+}
+.stamp {
+  position: absolute;
+  right: 82px;
+  bottom: 76px;
+  width: 500px;
+  padding: 25px 34px 27px;
+  background: #ffd65a;
+  border: 6px solid #33415c;
+  box-shadow: 12px 12px 0 #ff8b7b;
+  color: #243044;
+  text-align: center;
+  transform: rotate(-2deg);
+}
+.stamp strong { display: block; font-size: 45px; font-weight: 950; letter-spacing: -.04em; }
+.stamp span { display: block; margin-top: 5px; font-size: 23px; font-weight: 850; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <iframe src="index.html?seed=97"></iframe>
+  <div class="wash"></div>
+  <div class="blob a"></div><div class="blob b"></div><div class="blob c"></div>
+
+  <section class="paper">
+    <div class="eyebrow">PROCEDURAL PIXEL ADVENTURE</div>
+    <h1>Drawn<br>Frontier</h1>
+    <p class="pitch">그림으로 <b>도구</b>를 만들고<br><b>개척</b>하기! ✨</p>
+    <div class="rules">
+      <div class="rule r1"><i>△</i><div>꺾인 각도<small>파쇄력</small></div></div>
+      <div class="rule r2"><i>↔</i><div>획의 길이<small>사거리</small></div></div>
+      <div class="rule r3"><i>○</i><div>감싼 넓이<small>부력</small></div></div>
+      <div class="rule r4"><i>✦</i><div>갈래의 수<small>포획력</small></div></div>
+    </div>
+    <div class="goal"><span></span>그린 성능이 그대로 장비가 된다!</div>
+  </section>
+
+  <section class="sketch-card">
+    <h2>DRAW IT → USE IT</h2>
+    <svg viewBox="0 0 720 220" aria-hidden="true">
+      <path d="M54 177 L166 48 L286 174 M365 170 C390 62 520 52 555 169 C489 116 430 116 365 170 Z M614 52 L614 176 M574 92 L657 92 M580 147 L650 147"
+        fill="none" stroke="#33415c" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M54 177 L166 48 L286 174" fill="none" stroke="#ff7b6b" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M365 170 C390 62 520 52 555 169 C489 116 430 116 365 170 Z" fill="rgba(126,224,192,.28)" stroke="#7ee0c0" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M614 52 L614 176 M574 92 L657 92 M580 147 L650 147" fill="none" stroke="#7fd0ff" stroke-width="9" stroke-linecap="round"/>
+      <circle cx="166" cy="48" r="18" fill="#ffd166" stroke="#33415c" stroke-width="5"/>
+    </svg>
+  </section>
+  <div class="arrow">↘</div>
+  <div class="stamp"><strong>랜덤 맵 100% 개척</strong><span>매번 달라지는 나만의 원정</span></div>
+</div>
+</body>
+</html>

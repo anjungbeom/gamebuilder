@@ -42,6 +42,18 @@ export function handToolProfile(raw) {
   return { type, stats };
 }
 
+// 총 선 길이는 설계 예산으로만 제한하고, 투척 무게는 그 예산 안에서
+// 얼마나 조밀하고 넓게 채웠는지로 해석한다.
+export function toolThrowProfile(raw, stats = raw) {
+  const compactness = clamp((raw.ink ?? 0) * .62 + (raw.buoy ?? 0) * .28 + (1 - (raw.reach ?? 0)) * .10, 0, 1);
+  const weight = clamp(.16 + compactness * .84, .16, 1);
+  const speed = 176 - weight * 72;
+  const range = 62 + (1 - weight) * 78 + (stats.reach ?? 0) * 22;
+  const damage = Math.max(1, Math.round(1 + weight * 2.4 + (stats.impact ?? 0) * 2.2));
+  const stagger = .12 + weight * .38;
+  return { weight, speed, range, damage, stagger };
+}
+
 export function petToolStats(raw) {
   return {
     power: clamp(raw.edge * .62 + raw.reach * .38, 0, 1),

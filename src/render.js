@@ -252,9 +252,13 @@ export function drawCreature(ctx, creature, sx, sy, time) {
     const slamTell = attackState === "slam-tell";
     ctx.strokeStyle = rangedTell ? `rgba(255,176,107,${(.38 + attackPulse * .38).toFixed(3)})` : slamTell ? `rgba(255,209,102,${(.38 + attackPulse * .42).toFixed(3)})` : `rgba(255,97,93,${(.34 + attackPulse * .42).toFixed(3)})`;
     ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.arc(sx, sy + 1, g.bodyRadius * 2.7 + 5 + Math.round(attackPulse * 2), 0, Math.PI * 2);
-    ctx.stroke();
+    const telegraphRadius = g.bodyRadius * 2.7 + 5 + Math.round(attackPulse * 2);
+    for (let i = 0; i < 3; i++) {
+      const a = -Math.PI * .76 + i * Math.PI * .76;
+      ctx.beginPath();
+      ctx.arc(sx, sy + 1, telegraphRadius, a, a + .28);
+      ctx.stroke();
+    }
     ctx.fillStyle = rangedTell ? "#ffb06b" : slamTell ? "#ffd166" : "#ff615d";
     ctx.fillRect(sx - 1, sy - g.bodyRadius - 18, 3, 3);
   }
@@ -276,11 +280,6 @@ export function drawCreature(ctx, creature, sx, sy, time) {
   }
 
   if (creature.isPet) {
-    ctx.strokeStyle = creature.downTimer > 0 ? "rgba(160,175,190,.65)" : "rgba(126,224,192,.8)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.arc(sx, sy, g.bodyRadius * 2.4 + 5, 0, Math.PI * 2);
-    ctx.stroke();
     if (creature.downTimer > 0) {
       ctx.fillStyle = "#d5dde8";
       ctx.fillRect(sx - 4, sy - g.bodyRadius - 12, 3, 1);
@@ -300,15 +299,12 @@ export function drawCreature(ctx, creature, sx, sy, time) {
 
   if (creature.rank !== "normal") {
     const pulse = 0.35 + Math.sin(time / 180 + creature.phase) * 0.12;
-    ctx.strokeStyle = creature.rank === "fieldboss" ? `rgba(255,97,93,${pulse})` : `rgba(255,209,102,${pulse})`;
-    ctx.lineWidth = creature.rank === "fieldboss" ? 3 : 2;
-    ctx.beginPath();
-    ctx.arc(sx, sy, g.bodyRadius * 2.6 + 7, 0, Math.PI * 2);
-    ctx.stroke();
     ctx.fillStyle = creature.rank === "fieldboss" ? "#ff615d" : "#ffd166";
     ctx.fillRect(sx - 7, sy - g.bodyRadius - 18, 14, 2);
     ctx.fillRect(sx - 5, sy - g.bodyRadius - 21, 3, 3);
     ctx.fillRect(sx + 2, sy - g.bodyRadius - 21, 3, 3);
+    ctx.fillStyle = `rgba(255,241,184,${pulse.toFixed(3)})`;
+    ctx.fillRect(sx - 1, sy - g.bodyRadius - 24, 3, 2);
 
     // 보스 전용 도트 프레임: 공격 종류가 실루엣만으로 읽힌다.
     const arm = Math.max(8, Math.round(g.bodyRadius * 1.25));
@@ -340,23 +336,22 @@ export function drawCreature(ctx, creature, sx, sy, time) {
     }
   }
 
-  if (creature.hostile && Number.isFinite(creature.hp)) {
-    const width = creature.rank === "fieldboss" ? 30 : creature.rank === "midboss" ? 24 : 14;
-    const y = Math.round(sy - g.bodyRadius - (creature.rank === "normal" ? 14 : 28));
-    ctx.fillStyle = "rgba(10,15,22,.8)";
-    ctx.fillRect(Math.round(sx - width / 2), y, width, 3);
-    ctx.fillStyle = creature.rank === "normal" ? "#ff786c" : "#ffd166";
-    ctx.fillRect(Math.round(sx - width / 2) + 1, y + 1, Math.round((width - 2) * creature.hp / creature.maxHp), 1);
-    if (creature.weakness && (creature.rank === "normal" || creature.weaknessExposed)) drawWeaknessMark(ctx, sx, y - 5, creature.weakness);
+  if (creature.weakness && (creature.rank === "normal" || creature.weaknessExposed)) {
+    drawWeaknessMark(ctx, sx, sy - g.bodyRadius - (creature.rank === "normal" ? 14 : 28), creature.weakness);
+  }
+
+  if (creature.lockedTarget) {
+    // 조준 보조는 경계선 대신 머리 위 하나의 도트로만 표시한다.
+    const lockPulse = .55 + Math.sin(time / 90 + creature.phase) * .25;
+    const lockY = Math.round(sy - g.bodyRadius - (creature.rank === "normal" ? 19 : 34));
+    ctx.fillStyle = `rgba(218,55,65,${lockPulse.toFixed(3)})`;
+    ctx.fillRect(Math.round(sx - 2), lockY, 5, 3);
+    ctx.fillStyle = "#fff1b8";
+    ctx.fillRect(Math.round(sx - 1), lockY + 1, 2, 1);
   }
 
   // 행동을 보기 전에도 적대 여부가 읽히는 고정 표식.
   const signal = creature.hostile ? "#ff615d" : "#7ee0c0";
-  ctx.strokeStyle = signal;
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.arc(sx, sy + 1, g.bodyRadius * 2.2 + 3, 0, Math.PI * 2);
-  ctx.stroke();
   ctx.fillStyle = signal;
   if (creature.hostile) {
     ctx.fillRect(sx - 1, sy - g.bodyRadius - 10, 2, 5);
@@ -555,7 +550,7 @@ function drawWeaknessMark(ctx, x, y, weakness) {
   }
 }
 
-export function drawPlayer(ctx, sx, sy, faceX, faceY, walking, time, afloat, running = false, shoes = null, hurt = 0, deathProgress = 0, bindTimer = 0, dodgeTimer = 0) {
+export function drawPlayer(ctx, sx, sy, faceX, faceY, walking, time, afloat, running = false, shoes = null, hurt = 0, deathProgress = 0, bindTimer = 0, dodgeTimer = 0, craftingProgress = 0) {
   if (deathProgress > 0) {
     ctx.save();
     ctx.translate(Math.round(sx), Math.round(sy) + Math.round(deathProgress * 6));
@@ -620,6 +615,33 @@ export function drawPlayer(ctx, sx, sy, faceX, faceY, walking, time, afloat, run
     ctx.fillStyle = "#c39759";
     ctx.fillRect(x - 2, y - 1, 5, 1);
   }
+
+  // 작은 팔과 손을 몸통 바깥으로 빼서 어떤 방향에서도 실루엣이 읽히게 한다.
+  const celebrating = craftingProgress > 0;
+  ctx.fillStyle = hurt > 0.18 ? "#ff9a84" : "#c94943";
+  if (celebrating) {
+    const lift = Math.round(Math.sin(Math.min(1, craftingProgress) * Math.PI) * 2);
+    ctx.fillRect(x - 6, y - 7 - lift, 3, 6);
+    ctx.fillRect(x + 4, y - 7 - lift, 3, 6);
+    ctx.fillStyle = "#f2c8a0";
+    ctx.fillRect(x - 7, y - 9 - lift, 3, 3);
+    ctx.fillRect(x + 5, y - 9 - lift, 3, 3);
+  } else if (side) {
+    const frontHandX = x + dir * 6;
+    const backHandX = x - dir * 5;
+    ctx.fillRect(Math.min(x + dir * 3, frontHandX), y - 2, 4, 2);
+    ctx.fillRect(Math.min(x - dir * 4, backHandX), y, 3, 2);
+    ctx.fillStyle = "#f2c8a0";
+    ctx.fillRect(frontHandX - (dir < 0 ? 2 : 0), y - 2, 3, 3);
+    ctx.fillRect(backHandX - (dir < 0 ? 2 : 0), y, 3, 3);
+  } else {
+    ctx.fillRect(x - 6, y - 3, 3, 5);
+    ctx.fillRect(x + 4, y - 3, 3, 5);
+    ctx.fillStyle = "#f2c8a0";
+    ctx.fillRect(x - 7, y + 1, 3, 3);
+    ctx.fillRect(x + 5, y + 1, 3, 3);
+  }
+
   ctx.fillStyle = "#f2c8a0";
   ctx.fillRect(x - 3, y - 10, 7, 6);
   ctx.fillStyle = "#3a2a20";
@@ -695,6 +717,46 @@ export function drawHeldTool(ctx, tool, sx, sy, faceX, faceY, swing) {
   ctx.restore();
 }
 
+/** 제작 직후, 멈춘 필드 위에서 새 도구를 양손으로 들어 올리는 짧은 공개 연출. */
+export function drawCraftingReveal(ctx, tool, sx, sy, progress) {
+  if (!tool) return;
+  const rise = Math.sin(Math.min(1, progress) * Math.PI);
+  const toolY = Math.round(sy - 22 - rise * 4);
+  ctx.save();
+  ctx.globalAlpha = 1;
+
+  ctx.fillStyle = "rgba(255,247,201,.88)";
+  ctx.fillRect(Math.round(sx) - 13, toolY - 9, 27, 17);
+  ctx.strokeStyle = "#d99b12";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(Math.round(sx) - 13, toolY - 9, 27, 17);
+
+  ctx.save();
+  ctx.translate(Math.round(sx), toolY);
+  ctx.scale(1.25, 1.25);
+  ctx.strokeStyle = "#20242c";
+  ctx.lineWidth = 2.5;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  strokePath(ctx, tool.strokes);
+  ctx.strokeStyle = tool.color ?? "#ffd166";
+  ctx.lineWidth = 1.2;
+  strokePath(ctx, tool.strokes);
+  ctx.restore();
+
+  const sparkle = Math.floor(progress * 10) % 2;
+  ctx.fillStyle = "#ffd65a";
+  ctx.fillRect(Math.round(sx) - 20, toolY - 5 - sparkle, 5, 1);
+  ctx.fillRect(Math.round(sx) - 18, toolY - 7 - sparkle, 1, 5);
+  ctx.fillRect(Math.round(sx) + 17, toolY - 1 + sparkle, 5, 1);
+  ctx.fillRect(Math.round(sx) + 19, toolY - 3 + sparkle, 1, 5);
+  ctx.fillStyle = "#7fd0ff";
+  ctx.fillRect(Math.round(sx) - 11, toolY - 14 + sparkle, 3, 3);
+  ctx.fillStyle = "#7ee0c0";
+  ctx.fillRect(Math.round(sx) + 10, toolY - 12 - sparkle, 3, 3);
+  ctx.restore();
+}
+
 function strokePath(ctx, strokes) {
   for (const stroke of strokes) {
     if (stroke.length < 2) continue;
@@ -737,6 +799,37 @@ export function drawParryEffect(ctx, sx, sy, faceX, faceY, timer, cooldown, flas
     ctx.fillRect(Math.round(Math.cos(angle) * 12) - 1, Math.round(Math.sin(angle) * 12) - 1, 3, 3);
   }
   ctx.restore();
+}
+
+export function drawSuccessEffects(ctx, effects, camX, camY) {
+  for (const effect of effects) {
+    const progress = 1 - effect.time / effect.duration;
+    const alpha = Math.max(0, 1 - progress);
+    const x = Math.round(effect.x - camX);
+    const y = Math.round(effect.y - camY);
+    ctx.save();
+    ctx.translate(x, y);
+    if (effect.kind === "dodge") {
+      ctx.strokeStyle = `rgba(126,224,192,${(.85 * alpha).toFixed(3)})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-10 - progress * 8, 0); ctx.lineTo(3, 0); ctx.lineTo(-1, -4); ctx.moveTo(3, 0); ctx.lineTo(-1, 4);
+      ctx.stroke();
+      ctx.fillStyle = `rgba(218,244,255,${(.72 * alpha).toFixed(3)})`;
+      ctx.fillRect(-4, -8 - Math.round(progress * 5), 3, 3);
+    } else {
+      ctx.strokeStyle = `rgba(255,241,184,${(.95 * alpha).toFixed(3)})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(0, 0, 7 + progress * 14, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = `rgba(220,239,255,${(.9 * alpha).toFixed(3)})`;
+      for (let i = 0; i < 4; i++) {
+        const angle = i * Math.PI / 2 + Math.PI / 4;
+        const d = 8 + progress * 12;
+        ctx.fillRect(Math.round(Math.cos(angle) * d) - 1, Math.round(Math.sin(angle) * d) - 1, 3, 3);
+      }
+    }
+    ctx.restore();
+  }
 }
 
 export function drawRevealEffect(ctx, effect, camX, camY) {
@@ -786,8 +879,11 @@ export function drawAtmosphere(ctx, w, h, env, time) {
   } else if (weather === "fog") {
     for (let i = 0; i < 5; i++) {
       const x = ((i * 97 + time * .012) % (w + 120)) - 60;
-      ctx.fillStyle = "rgba(205,220,226,.055)";
-      ctx.fillRect(x, 25 + i * 37, 115, 18);
+      const alpha = .065 + (i % 2) * .025;
+      ctx.fillStyle = `rgba(205,220,226,${alpha.toFixed(3)})`;
+      ctx.fillRect(x, 25 + i * 37, 145, 20);
+      ctx.fillStyle = `rgba(233,242,240,${(alpha * .45).toFixed(3)})`;
+      ctx.fillRect(x + 32, 29 + i * 37, 86, 4);
     }
   } else if (weather === "wind") {
     ctx.strokeStyle = "rgba(225,240,230,.18)";

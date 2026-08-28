@@ -317,6 +317,44 @@ kbd {
   line-height: 1.1;
   text-shadow: 0 0 22px rgba(127, 208, 255, 0.14);
 }
+.title-card { position: relative; isolation: isolate; }
+.crayon-title {
+  position: relative;
+  display: inline-flex;
+  gap: .22em;
+  padding: .14em .22em;
+  color: #263752;
+  text-shadow: 2px 2px 0 #fff7c9 !important;
+}
+.crayon-title::before,
+.crayon-title::after {
+  content: "";
+  position: absolute;
+  left: -3%;
+  z-index: -1;
+  width: 106%;
+  height: .24em;
+  transform: scaleX(0) rotate(-1.5deg);
+  transform-origin: left center;
+  background: repeating-linear-gradient(0deg, #ffd65a 0 2px, #f4b943 2px 3px, transparent 3px 4px);
+  animation: crayon-swipe 760ms steps(9,end) forwards;
+}
+.crayon-title::before { top: 42%; }
+.crayon-title::after { top: 68%; animation-delay: 360ms; background-color: rgba(127,208,255,.38); }
+.crayon-title span { opacity: 0; transform: translateY(5px) rotate(-2deg); animation: crayon-letter 380ms steps(4,end) forwards; }
+.crayon-title span:first-child { animation-delay: 300ms; }
+.crayon-title span:last-child { animation-delay: 690ms; transform: translateY(5px) rotate(1deg); }
+.title-challenge {
+  margin-top: 8px;
+  color: #9a5600;
+  font-weight: 800;
+  font-size: clamp(10px,1.7cqw,16px);
+  opacity: 0;
+  animation: challenge-pop 300ms steps(3,end) 1.05s forwards;
+}
+@keyframes crayon-swipe { to { transform: scaleX(1) rotate(-1.5deg); } }
+@keyframes crayon-letter { to { opacity: 1; transform: translateY(0) rotate(0); } }
+@keyframes challenge-pop { to { opacity: 1; transform: translateY(0); } from { opacity: 0; transform: translateY(4px); } }
 #overlay .mission {
   width: min(90%, 560px);
   margin: 14px auto 0;
@@ -691,6 +729,13 @@ kbd {
 #stage[data-ui-grade] .dura-meter { background: color-mix(in srgb, var(--hud-panel) 76%, #8c9aad); border-color: color-mix(in srgb, var(--hud-stroke) 38%, transparent); }
 #stage[data-ui-grade] #minimap { border-color: var(--hud-stroke); }
 #stage[data-ui-grade] .palette-key { border-top-color: color-mix(in srgb, var(--hud-stroke) 28%, transparent); }
+
+/* 인게임 HUD는 상태·방향만 읽히게 하고, 수치 확인은 장비 가방으로 모은다. */
+#stage[data-ui-grade] #progress b,
+#stage[data-ui-grade] .bar-row .val,
+#stage[data-ui-grade] #tool-dura,
+#stage[data-ui-grade] #dura-meter { display: none; }
+#stage[data-ui-grade] #progress > div { min-width: 3.8em; }
 
 .settings-wrap { width: min(94%, 820px); max-height: 92%; overflow: auto; }
 .settings-layout { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(220px, .8fr); gap: 10px; margin-top: 12px; text-align: left; }

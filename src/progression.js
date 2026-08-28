@@ -4,7 +4,7 @@ import { hashUnit } from "./rng.js";
 
 export const PROGRESSION_TIERS = [
   { fragments: 2, name: "채집 요령", description: "기술 조각 발견 확률 +10%" },
-  { fragments: 5, name: "점프", description: "X로 지형과 투사체를 한 번 뛰어넘기" },
+  { fragments: 5, name: "점프", description: "↑로 지형과 투사체를 한 번 뛰어넘기" },
   { fragments: 9, name: "현장 수리", description: "기술 조각 발견 시 장비 수리, 제작 잉크 -1" },
   { fragments: 14, name: "와이어", description: "E로 크리처를 끌거나 걸린 지점으로 이동" },
   { fragments: 20, name: "반사 방벽", description: "R로 투사체를 막아 되돌리는 방벽 펼치기" },

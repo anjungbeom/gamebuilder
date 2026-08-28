@@ -76,6 +76,10 @@ test("타이틀에서 새 세계를 시작하고 프레임이 돈다", () => {
   const overlay = getEl("overlay");
   const click = overlay._handlers.get("click");
   assert.equal(typeof click, "function");
+  assert.match(overlay.innerHTML, /crayon-title/);
+  assert.match(overlay.innerHTML, /그림으로 <b>도구<\/b>를 만들고 <b>개척<\/b>하기! ✨/);
+  assert.match(overlay.innerHTML, /일정 크기의 랜덤 맵을 모두 개척하는 것이 목표!/);
+  assert.doesNotMatch(overlay.innerHTML, /막힌 길은 직접/);
   const btn = makeEl(); btn.dataset.act = "new";
   click({ target: { closest: () => btn } });
 
@@ -130,7 +134,7 @@ test("도구를 그려 확정하면 저장에 남는다", () => {
   down(key("Enter"));
 
   let t = 4000;
-  for (let i = 0; i < 40; i++) { frameCb(t); t += 16; }
+  for (let i = 0; i < 80; i++) { frameCb(t); t += 16; }
 
   const save = JSON.parse(store.get("drawn-frontier-v2"));
   assert.ok(save.tool, "확정한 도구가 저장되어야 한다");
@@ -139,6 +143,18 @@ test("도구를 그려 확정하면 저장에 남는다", () => {
   assert.ok(save.tool.strokes.length >= 1);
   assert.equal(save.gear.hand.length, 1, "제작한 손도구가 장비 팔레트에 남아야 한다");
   assert.equal(save.ink, 9, "한 획짜리 장비는 잉크 하나를 사용한다");
+});
+
+test("T 투척은 장착 도구를 가방에서 제거하고 게임 루프를 유지한다", () => {
+  const down = winHandlers.get("keydown");
+  down(key("KeyT"));
+  const thrown = JSON.parse(store.get("drawn-frontier-v2"));
+  assert.equal(thrown.tool, null);
+  assert.equal(thrown.equipped.hand, null);
+  assert.equal(thrown.gear.hand.length, 0);
+  let t = 5300;
+  for (let i = 0; i < 35; i++) { frameCb(t); t += 16; }
+  assert.equal(typeof frameCb, "function");
 });
 
 test("지우기 모드에서 선택한 획 하나만 제거된다", () => {
@@ -161,8 +177,8 @@ test("지우기 모드에서 선택한 획 하나만 제거된다", () => {
   down(key("Enter"));
 
   const save = JSON.parse(store.get("drawn-frontier-v2"));
-  assert.equal(save.gear.hand.length, 2);
-  assert.equal(save.gear.hand[1].strokes.length, 1);
+  assert.equal(save.gear.hand.length, 1);
+  assert.equal(save.gear.hand[0].strokes.length, 1);
 });
 
 test("Tab 장비 가방에서 신발을 그려 장착한다", () => {

@@ -6,16 +6,18 @@ export const KEY_ACTIONS = [
   { id: "sprint", label: "달리기", code: "ShiftLeft" },
   { id: "draw", label: "도구 그리기", code: "KeyQ" },
   { id: "attack", label: "공격·사용", code: "Space" },
+  { id: "throw", label: "일회성 도구 투척", code: "KeyT" },
   { id: "parry", label: "패링", code: "KeyP" },
-  { id: "dodge", label: "회피", code: "KeyZ" },
+  { id: "dodge", label: "회피", code: "Slash" },
   { id: "capture", label: "포획·길들이기", code: "KeyF" },
   { id: "inventory", label: "장비 가방", code: "Tab" },
   { id: "dex", label: "크리처 도감", code: "KeyC" },
   { id: "map", label: "세계 지도", code: "KeyM" },
   { id: "challenges", label: "도전과제", code: "KeyV" },
-  { id: "jump", label: "점프", code: "KeyX" },
+  { id: "jump", label: "점프", code: "ArrowUp" },
   { id: "wire", label: "와이어", code: "KeyE" },
-  { id: "reflector", label: "반사 방벽", code: "KeyR" }
+  { id: "reflector", label: "반사 방벽", code: "KeyR" },
+  { id: "lockOn", label: "상대 락온", code: "KeyL" }
 ];
 
 export const DEFAULT_KEYMAP = Object.fromEntries(KEY_ACTIONS.map(action => [action.id, action.code]));
@@ -48,6 +50,7 @@ export function actionForCode(keymap, code) {
 export function keyLabel(code) {
   const labels = {
     Space: "Space", Tab: "Tab", ShiftLeft: "L Shift", ShiftRight: "R Shift",
+    Slash: "/", Comma: ",", Period: ".",
     ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→",
     Backspace: "Backspace", Enter: "Enter"
   };
