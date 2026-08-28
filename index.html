@@ -4,21 +4,21 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#fff4c7">
-<meta name="description" content="직접 그린 도구로 길을 열고 다섯 지역의 신호기를 활성화하는 절차 생성 탐험 게임.">
+<meta name="description" content="화면에 그은 획의 길이, 꺾인 각도, 감싼 넓이, 갈래의 수가 그대로 장비 성능이 되는 절차 생성 도트 탐험 게임. 일정 크기의 랜덤 맵을 모두 개척하는 것이 목표!">
 <link rel="canonical" href="https://anjungbeom.github.io/gamebuilder/">
 <meta property="og:type" content="website">
-<meta property="og:title" content="Drawn Frontier — 길이 없으면, 그려서 연다">
-<meta property="og:description" content="직접 그린 장비로 절차 생성 세계를 탐사하고 크리처를 포획하는 도트 탐험 게임.">
+<meta property="og:title" content="Drawn Frontier — 그림으로 도구를 만들고 개척하기! ✨">
+<meta property="og:description" content="획의 길이, 꺾인 각도, 감싼 넓이, 갈래의 수가 장비 성능이 되는 절차 생성 도트 탐험 게임. 랜덤 맵을 모두 개척하자!">
 <meta property="og:url" content="https://anjungbeom.github.io/gamebuilder/">
 <meta property="og:image" content="https://anjungbeom.github.io/gamebuilder/thumbnail.png">
 <meta property="og:image:width" content="1920">
 <meta property="og:image:height" content="1080">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Drawn Frontier — 길이 없으면, 그려서 연다">
-<meta name="twitter:description" content="직접 그린 장비로 절차 생성 세계를 탐사하고 크리처를 포획하는 도트 탐험 게임.">
+<meta name="twitter:title" content="Drawn Frontier — 그림으로 도구를 만들고 개척하기! ✨">
+<meta name="twitter:description" content="획의 길이, 꺾인 각도, 감싼 넓이, 갈래의 수가 장비 성능이 되는 절차 생성 도트 탐험 게임. 랜덤 맵을 모두 개척하자!">
 <meta name="twitter:image" content="https://anjungbeom.github.io/gamebuilder/thumbnail.png">
 <link rel="manifest" href="manifest.webmanifest">
-<title>Drawn Frontier — 길이 없으면, 그려서 연다</title>
+<title>Drawn Frontier — 그림으로 도구를 만들고 개척하기! ✨</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -42,14 +42,14 @@
       <div class="shard-line"><span>기술 조각</span><b id="p-fragments">0 / 2</b></div>
       <div class="shoe-line"><span>신발</span><b id="shoe-name">기본 장화</b></div>
       <div class="environment-line"><span id="env-time">낮</span><b id="env-weather">맑음</b></div>
-      <div class="environment-line"><span id="env-temp">18°C · 쾌적</span><b id="env-noise">조용함</b></div>
-      <div id="palette-key" class="palette-key"><kbd>Space</kbd> 공격 · <kbd>P</kbd> 패링 · <kbd>Z</kbd> 회피 · <kbd>F</kbd> 포획 · <kbd>V</kbd> 도전 · <kbd>M</kbd> 지도</div>
+      <div class="environment-line"><span id="env-temp">쾌적</span><b id="env-noise">조용함</b></div>
+      <div id="palette-key" class="palette-key"><kbd>Space</kbd> 공격 · <kbd>P</kbd> 패링 · <kbd>/</kbd> 전방 대시 · <kbd>L</kbd> 조준 락온 · <kbd>F</kbd> 포획 · <kbd>V</kbd> 도전 · <kbd>M</kbd> 지도</div>
     </div>
 
     <div id="progress" class="panel" hidden>
-      <div><b id="p-marks">0</b><span>/5 신호기</span></div>
+      <div><b id="p-marks">탐색</b><span>신호기</span></div>
       <div><b id="p-catalog">0</b><span>발견한 종</span></div>
-      <div><b id="p-depth">0</b><span>이동 거리</span></div>
+      <div><b id="p-depth">탐사</b><span>이동</span></div>
       <div><b id="p-captures">0</b><span>적대 포획</span></div>
       <div><b id="p-ink">10</b><span>잉크</span></div>
     </div>
@@ -90,6 +90,6 @@
     <div id="overlay" hidden></div>
   </div>
 </div>
-<script type="module" src="src/game.js?rev=4"></script>
+<script type="module" src="src/game.js?rev=7"></script>
 </body>
 </html>

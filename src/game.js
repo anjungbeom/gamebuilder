@@ -22,12 +22,12 @@ import {
 import { environmentAt, thermalState, noiseLabel } from "./environment.js";
 import { creatureRewardProfile, scoreCreatureActions, scoreVillagerActions, scorePetActions, selectRewardAction } from "./behavior.js";
 import { ROTATING_TIPS, challengeRows, challengeState, nextChallenge } from "./challenges.js";
-import { handToolProfile, petToolStats, drawingLengthState, milestoneLengthBudget } from "./equipment.js?rev=4";
-import { KEY_ACTIONS, DEFAULT_KEYMAP, normalizePreferences, rebindKey, actionForCode, keyLabel } from "./settings.js?rev=4";
+import { handToolProfile, petToolStats, drawingLengthState, milestoneLengthBudget } from "./equipment.js?rev=6";
+import { KEY_ACTIONS, DEFAULT_KEYMAP, normalizePreferences, rebindKey, actionForCode, keyLabel } from "./settings.js?rev=6";
 import {
-  drawTerrain, drawLandmark, drawCreature, drawPlayer, drawHeldTool, drawVignette,
+  drawTerrain, drawLandmark, drawCreature, drawPlayer, drawHeldTool, drawCraftingReveal, drawVignette,
   drawDeathDrops, drawParryEffect, drawAtmosphere, drawRevealEffect,
-  drawVillage, drawVillager, drawSmokeEffects
+  drawVillage, drawVillager, drawSmokeEffects, drawSuccessEffects
 } from "./render.js";
 
 const canvas = document.getElementById("game");
@@ -44,6 +44,7 @@ const PAD_H = pad.height;
 const el = {
   stage: document.getElementById("stage"),
   paletteKey: document.getElementById("palette-key"),
+  drawBox: document.getElementById("draw-box"),
   toolPanel: document.getElementById("tool-panel"),
   toolName: document.getElementById("tool-name"),
   toolDura: document.getElementById("tool-dura"),
@@ -107,10 +108,13 @@ const PET_STAT_DEFS = [
   { key: "guard", label: "생존력", color: "var(--buoy)", tick: .45 },
   { key: "control", label: "제압력", color: "var(--grip)", tick: .45 }
 ];
+const FRONTIER_LABELS = ["초심", "탐사자", "현장가", "숙련자", "정예", "개척자", "전설"];
 const CAPTURE_MILESTONES = [2, 5, 9, 14];
 const DROP_LIFETIME = 10;
 const DEATH_DROP_LIFETIME = 60;
 const WIRE_RANGE = 68;
+const CRAFTING_DURATION = 1.15;
+const TIP_ROTATION_MS = 5000;
 
 const ITEM_DEFS = {
   stone: { name: "돌 조각", color: "#b9c2cf", source: "boulder" },
@@ -144,6 +148,7 @@ let droppedItems = [];
 let deathDrops = [];
 let villagers = [];
 let smokeEffects = [];
+let successEffects = [];
 let projectiles = [];
 let wireState = null;
 let deathState = null;
@@ -155,6 +160,8 @@ let lastDayPeriod = null;
 let palettePage = "gear";
 let rebindingAction = null;
 let settingsReturn = "palette";
+let craftingTimer = 0;
+let craftingItem = null;
 
 function loadPreferences() {
   try { return normalizePreferences(JSON.parse(localStorage.getItem(PREF_KEY) ?? "{}")); }
@@ -195,6 +202,7 @@ function newGame(seed) {
     knockX: 0,
     knockY: 0,
     screenShake: 0,
+    lockTargetKey: null,
     hp: 5,
     maxHp: 5,
     invuln: 0,
@@ -695,7 +703,7 @@ function updatePet(dt) {
     }
     pet.facing = target.x >= pet.x ? 1 : -1;
     if (target.hp <= 0) defeatCreature(target);
-    else toast(`${pet.genome.name}이 함께 공격했다 · ${damage} 피해`, damage > 2 ? "good" : "");
+    else toast(`${pet.genome.name}이 함께 공격했다`, damage > 2 ? "good" : "");
   }
 
   const desiredX = action === "attack" && target
@@ -724,12 +732,12 @@ function hurtPet(reason) {
   pet.invuln = 1 + guard * .8;
   dirty = true;
   if (pet.hp > 0) {
-    toast(`${pet.genome.name}이 ${reason}에 맞았다 · 체력 ${pet.hp}/${pet.maxHp}`, "bad");
+    toast(`${pet.genome.name}이 ${reason}에 맞았다`, "bad");
     return;
   }
   pet.hp = 0;
   pet.downTimer = 8;
-  toast(`${pet.genome.name}이 쓰러졌다 · 8초 뒤 다시 합류`, "bad");
+  toast(`${pet.genome.name}이 쓰러졌다 · 잠시 뒤 다시 합류`, "bad");
 }
 
 // 실제 이동 벡터는 즉시 바뀌어도 도트 에셋은 짧은 관성을 가진다.
@@ -813,6 +821,7 @@ function updateCreatureAttack(c, creatureKey, dt) {
         c.disarmed = parryDisarmDuration(c.rank);
         c.stun = .4;
         game.parryFlash = .42;
+        successEffect(game.px, game.py, "parry");
         toast(`${c.genome.name}의 내려찍기를 정확히 패링했다`, "good");
       } else hurtPlayer(`${c.genome.name}의 내려찍기`, c, profile);
     }
@@ -838,7 +847,8 @@ function updateCreatureAttack(c, creatureKey, dt) {
         c.attackState = "recover";
         c.attackTimer = profile.recover;
         game.parryFlash = .35;
-        toast(`${c.genome.name}의 돌진을 정확히 패링했다 · ${c.disarmed.toFixed(1)}초 무장해제`, "good");
+        successEffect(game.px, game.py, "parry");
+        toast(`${c.genome.name}의 돌진을 정확히 패링했다 · 잠시 무장해제`, "good");
       } else {
         hurtPlayer(`${c.genome.name}의 돌진`, c, profile);
       }
@@ -861,6 +871,8 @@ function updateCreatures(dt) {
   const env = currentEnvironment();
   const sightFactor = .72 + env.daylight * .38;
   const hostileAwareness = (48 + game.noise * 58) * sightFactor;
+  const locked = game.lockTargetKey ? creatures.get(game.lockTargetKey) : null;
+  if (!locked || !locked.hostile || locked.hp <= 0 || Math.hypot(locked.x - game.px, locked.y - game.py) > LOCK_RANGE * 1.08) game.lockTargetKey = null;
   for (const [creatureKey, c] of creatures) {
     if (regionRequiredMarksAt(Math.floor(c.x / TILE), Math.floor(c.y / TILE)) > game.found.size) continue;
     const dx = game.px - c.x;
@@ -946,7 +958,7 @@ function creatureBlocked(wx, wy) {
 
 function tryJump() {
   if (!progressionEffects(game.frontierTier).jump) {
-    toast("점프는 탐사 등급 2에서 사용할 수 있다", "bad");
+    toast("점프 기술을 먼저 해금해야 한다", "bad");
     return;
   }
   if (game.jumpTimer > 0) return; // 공중 재입력을 무시해 2단 점프를 막는다.
@@ -955,7 +967,7 @@ function tryJump() {
 
 function useReflector() {
   if (!progressionEffects(game.frontierTier).reflector) {
-    toast("반사 방벽은 탐사 등급 5에서 사용할 수 있다", "bad");
+    toast("반사 방벽 기술을 먼저 해금해야 한다", "bad");
     return;
   }
   if (!game.tool) {
@@ -974,7 +986,7 @@ function useReflector() {
 
 function useWire() {
   if (!progressionEffects(game.frontierTier).wire) {
-    toast("와이어는 탐사 등급 4에서 사용할 수 있다", "bad");
+    toast("와이어 기술을 먼저 해금해야 한다", "bad");
     return;
   }
   if (wireState) return;
@@ -1096,6 +1108,7 @@ function updateProjectiles(dt) {
       projectile.reflected = true;
       projectile.parried = game.parryTimer > 0;
       game.parryFlash = game.parryTimer > 0 ? 0.35 : game.parryFlash;
+      if (game.parryTimer > 0) successEffect(game.px, game.py, "parry");
       if (game.parryTimer > 0) toast("패링 성공 — 투사체를 되돌렸다", "good");
       kept.push(projectile);
       continue;
@@ -1112,7 +1125,7 @@ function updateProjectiles(dt) {
           target.disarmed = parryDisarmDuration(target.rank);
           target.hitFlash = 0.3;
           if (target.hp <= 0) defeatCreature(target);
-          else toast(`${target.genome.name}에게 투사체 반사 · 2 피해 · 무장해제`, "good");
+          else toast(`${target.genome.name}에게 투사체 반사 · 무장해제`, "good");
         } else {
           target.stun = 2.6;
           toast(`${target.genome.name}의 투사체를 되돌려 기절시켰다`, "good");
@@ -1236,6 +1249,7 @@ function hurtPlayer(reason, attacker = null, attackProfile = null) {
   if (game.dodgeTimer > 0) {
     game.dodgeLinkTimer = dodgeTiming().wireLink;
     game.parryFlash = Math.max(game.parryFlash, .18);
+    successEffect(game.px, game.py, "dodge");
     toast(`${reason}을 회피했다 — 약점 쪽 와이어 연결이 잠깐 열렸다`, "good");
     return;
   }
@@ -1253,7 +1267,7 @@ function hurtPlayer(reason, attacker = null, attackProfile = null) {
   dirty = true;
 
   if (game.hp > 0) {
-    toast(`${reason}에 맞았다 — 밀려나고 ${profile.bind.toFixed(1)}초 경직`, "bad");
+    toast(`${reason}에 맞았다 — 밀려나고 잠시 경직`, "bad");
     return;
   }
 
@@ -1286,7 +1300,7 @@ function showRespawn() {
   mode = "death";
   el.overlay.hidden = false;
   const village = lastVisitedVillage();
-  el.overlay.innerHTML = `<div class="death-dialog"><h1>탐험가가 쓰러졌다</h1><p class="sub">장비와 수집품은 쓰러진 자리에 60초 동안 남습니다.<br>진행을 유지하면 마지막으로 방문한 <b>${village.name}</b>에서 다시 시작합니다.</p><div class="row"><button data-act="respawn">진행 유지 · ${village.name}에서 재시작</button><button class="danger" data-act="reset-expedition">모든 진행 초기화</button></div><p class="reset-warning">초기화하면 신호기, 도감, 포획, 보스, 기술, 펫, 장비, 수집품이 모두 사라집니다.</p></div>`;
+  el.overlay.innerHTML = `<div class="death-dialog"><h1>탐험가가 쓰러졌다</h1><p class="sub">장비와 수집품은 쓰러진 자리에 잠시 남습니다.<br>진행을 유지하면 마지막으로 방문한 <b>${village.name}</b>에서 다시 시작합니다.</p><div class="row"><button data-act="respawn">진행 유지 · ${village.name}에서 재시작</button><button class="danger" data-act="reset-expedition">모든 진행 초기화</button></div><p class="reset-warning">초기화하면 신호기, 도감, 포획, 보스, 기술, 펫, 장비, 수집품이 모두 사라집니다.</p></div>`;
 }
 
 function respawnPlayer() {
@@ -1367,6 +1381,41 @@ function nearestCreature() {
   return best;
 }
 
+const LOCK_RANGE = 150;
+
+function lockCandidates() {
+  return [...creatures.values()]
+    .filter(c => c.hostile && c.hp > 0 && Math.hypot(c.x - game.px, c.y - game.py) <= LOCK_RANGE)
+    .sort((a, b) => Math.hypot(a.x - game.px, a.y - game.py) - Math.hypot(b.x - game.px, b.y - game.py));
+}
+
+function toggleLockOn() {
+  const candidates = lockCandidates();
+  if (candidates.length === 0) {
+    game.lockTargetKey = null;
+    toast("주변에 락온할 상대가 없다");
+    return;
+  }
+  const current = candidates.findIndex(c => creatureKey(c) === game.lockTargetKey);
+  const next = candidates[(current + 1 + candidates.length) % candidates.length];
+  game.lockTargetKey = creatureKey(next);
+  updateLockedFacing();
+  toast(`${next.rank === "normal" ? "상대" : "우두머리"} 포커싱`, "good");
+}
+
+function updateLockedFacing() {
+  const target = game.lockTargetKey ? creatures.get(game.lockTargetKey) : null;
+  if (!target || !target.hostile || target.hp <= 0) return false;
+  const dx = target.x - game.px;
+  const dy = target.y - game.py;
+  const length = Math.hypot(dx, dy);
+  if (length <= 0 || length > LOCK_RANGE * 1.08) return false;
+  game.faceX = dx / length;
+  game.faceY = dy / length;
+  if (Math.abs(game.faceX) > .12) game.facing = game.faceX < 0 ? -1 : 1;
+  return true;
+}
+
 function attackTarget() {
   if (!game) return null;
   const reach = 23 + (game.tool?.stats.reach ?? 0) * 19;
@@ -1374,7 +1423,9 @@ function attackTarget() {
   const fy = game.faceY || 0;
   let best = null;
   let bestDistance = Infinity;
-  for (const c of creatures.values()) {
+  const locked = game.lockTargetKey ? creatures.get(game.lockTargetKey) : null;
+  const ordered = locked ? [locked, ...creatures.values()].filter((c, index, all) => all.indexOf(c) === index) : [...creatures.values()];
+  for (const c of ordered) {
     if (!c.hostile || c.hp <= 0) continue;
     if (c.bossParts) {
       const part = c.bossParts.find(candidate => candidate.active && !candidate.destroyed);
@@ -1412,15 +1463,11 @@ function tryParry() {
 function tryDodge() {
   const timing = dodgeTiming();
   if (game.dodgeCooldown > 0 || game.bindTimer > 0 || deathState) return;
-  let dx = 0;
-  let dy = 0;
-  for (const code of keys) {
-    const direction = moveVectorForCode(code);
-    if (direction) { dx += direction[0]; dy += direction[1]; }
-  }
+  const dx = game.faceX || game.facing || 1;
+  const dy = game.faceY || 0;
   const length = Math.hypot(dx, dy) || 1;
-  game.dodgeX = dx !== 0 || dy !== 0 ? dx / length : (game.faceX || 1);
-  game.dodgeY = dx !== 0 || dy !== 0 ? dy / length : game.faceY;
+  game.dodgeX = dx / length;
+  game.dodgeY = dy / length;
   game.dodgeTimer = timing.window;
   game.dodgeCooldown = timing.cooldown;
   game.parryFlash = Math.max(game.parryFlash, .12);
@@ -1455,18 +1502,18 @@ function grantInteractionReward(source, x, y) {
 
   const repaired = progressionEffects(game.frontierTier).fieldRepair && repairEquippedGear();
   const unlocked = game.frontierTier > beforeTier ? PROGRESSION_TIERS[game.frontierTier - 1] : null;
-  const parts = ["기술 조각 +1", "잉크 +1", `${ITEM_DEFS[material].name} +1`];
-  if (repaired) parts.push("장비 수선 +1");
+  const parts = ["기술 조각을 찾았다", "잉크를 얻었다", `${ITEM_DEFS[material].name} 발견`];
+  if (repaired) parts.push("장비를 수선했다");
   if (unlocked) {
     parts.push(`${unlocked.name} 사용 가능`);
     celebrate(`새 기술: ${unlocked.name}`, unlocked.description);
     if (game.frontierTier === 5) {
       game.inventory.mirrorInk += 2;
-      parts.push("반사 잉크 +2");
+      parts.push("반사 잉크 발견");
     }
   } else if (progressionEffects(game.frontierTier).reflector && hashUnit(x, y, game.seed + 79001) < 0.28) {
     game.inventory.mirrorInk += 1;
-    parts.push("반사 잉크 +1");
+    parts.push("반사 잉크 발견");
   }
   rewardNotice(parts.join(" · "));
   return ` · ${parts.join(" · ")}`;
@@ -1497,11 +1544,11 @@ function interactCreature(c) {
   const need = c.hostile ? captureThresholdAtHp(baseNeed, c.hp, c.maxHp, c.rank) : baseNeed;
   const have = game.tool.stats.grip;
   if (!Number.isFinite(need)) {
-    toast(`아직 너무 건강하다 · 체력 ${c.hp}/${c.maxHp} · 먼저 공격해 약화시키자`, "bad");
+    toast("아직 기운이 넘친다 · 먼저 공격해 약화시키자", "bad");
     return;
   }
   if (have < need) {
-    toast(`포획력이 부족하다 · 필요 ${need.toFixed(2)} / 현재 ${have.toFixed(2)}`, "bad");
+    toast("포획력이 부족하다 · 더 약화된 뒤 다시 시도하자", "bad");
     dirty = true;
     return;
   }
@@ -1531,7 +1578,7 @@ function interactCreature(c) {
   }
   const reward = c.hostile ? (first ? 3 : 2) : (first ? 2 : 1);
   const milestoneText = game.milestone > beforeMilestone
-    ? ` · 포획 보너스! 장비칸 +1 · 잉크 +4 · 설계 길이 ${milestoneLengthBudget(game.milestone).budget}px로 확장`
+    ? " · 포획 보너스! 장비 공간과 설계 길이 한도가 늘었다"
     : "";
   toast(c.hostile
     ? `적대 크리처 포획 · ${c.genome.name} · 잉크 +${reward}${dropText}${milestoneText}`
@@ -1574,8 +1621,8 @@ function defeatCreature(c) {
   if (beforeTier < 5 && game.frontierTier >= 5) game.inventory.mirrorInk += 2;
   const rankLabel = isFieldBoss ? "영역 지배자" : isBoss ? "지역 우두머리" : "적대 크리처";
   const unlock = game.frontierTier > beforeTier ? ` · ${PROGRESSION_TIERS[game.frontierTier - 1].name} 사용 가능` : "";
-  toast(`${rankLabel} 처치 · ${c.genome.name} · 생체 결정 +${essenceReward} · 잉크 +${inkReward}${fragmentReward ? ` · 기술 조각 +${fragmentReward}` : ""}${isBoss ? " · 장비칸 +1" : ""}${randomDrop}${unlock}`, "good");
-  rewardNotice(`생체 결정 +${essenceReward} · 잉크 +${inkReward}${fragmentReward ? ` · 기술 조각 +${fragmentReward}` : ""}`);
+  toast(`${rankLabel} 처치 · ${c.genome.name} · 보상을 얻었다${isBoss ? " · 장비 공간 확장" : ""}${randomDrop}${unlock}`, "good");
+  rewardNotice(`생체 결정과 잉크를 얻었다${fragmentReward ? " · 기술 조각 발견" : ""}`);
   if (game.frontierTier > beforeTier) {
     const tier = PROGRESSION_TIERS[game.frontierTier - 1];
     celebrate(`새 기술: ${tier.name}`, tier.description);
@@ -1602,7 +1649,7 @@ function attackBossPart(c, part) {
   if (part.hp > 0) {
     persistBossState(c);
     saveNow();
-    toast(`${part.label}에 ${damage} 피해 · 내구 ${part.hp}/${part.maxHp}`);
+    toast(`${part.label}에 타격 · 아직 버티고 있다`);
     return;
   }
   part.destroyed = true;
@@ -1635,7 +1682,7 @@ function attackBossPart(c, part) {
 
 function attackCreature(c) {
   if (!c.hostile) {
-    toast(`온순한 크리처다 · F로 ${c.genome.name}을 길들이자`);
+    toast(`온순한 크리처다 · ${binding("capture")}로 ${c.genome.name}을 길들이자`);
     return;
   }
   if (c.rank !== "normal") {
@@ -1665,14 +1712,14 @@ function attackCreature(c) {
     return;
   }
   const weaknessText = c.weakness ? ` · 약점 ${WEAKNESS_LABELS[c.weakness]}` : "";
-  const captureText = c.rank === "normal" && c.hp / c.maxHp <= 0.38 ? " · F로 포획 가능" : "";
-  toast(`${c.genome.name}에게 ${damage} 피해 · 체력 ${c.hp}/${c.maxHp}${weaknessText}${captureText}`, damage >= 4 ? "good" : "");
+  const captureText = c.rank === "normal" && c.hp / c.maxHp <= 0.38 ? ` · ${binding("capture")}로 포획 가능` : "";
+    toast(`${c.genome.name}에게 ${damage >= 4 ? "강한 타격" : "타격"}${weaknessText}${captureText}`, damage >= 4 ? "good" : "");
   dirty = true;
 }
 
 function captureNearbyCreature() {
   if (!game.tool) {
-    toast("포획에 쓸 손도구가 없다 · Q로 포획력이 높은 도구를 그리자", "bad");
+    toast(`포획에 쓸 손도구가 없다 · ${binding("draw")}로 포획력이 높은 도구를 그리자`, "bad");
     return;
   }
   game.noise = clamp(game.noise + .16, 0, 1);
@@ -1687,7 +1734,7 @@ function captureNearbyCreature() {
 function useTool() {
   if (pickupNearbyDrop()) return;
   if (!game.tool) {
-    toast("손도구가 없다 · Q로 필요한 성능의 도구를 그리자", "bad");
+    toast(`손도구가 없다 · ${binding("draw")}로 필요한 성능의 도구를 그리자`, "bad");
     return;
   }
   game.swing = 1;
@@ -1717,7 +1764,7 @@ function useTool() {
       spendTool();
       saveNow();
     } else {
-      toast(`${rule.need}이 모자란다 — ${have.toFixed(2)} / ${rule.threshold.toFixed(2)}`, "bad");
+      toast(`${rule.need}이 모자란다 — 더 강한 도구가 필요하다`, "bad");
     }
     dirty = true;
     return;
@@ -1725,7 +1772,7 @@ function useTool() {
 
   const c = nearbyCreature;
   if (c) {
-    toast(`◇ ${c.genome.name} · F로 길들일 수 있다`);
+    toast(`◇ ${c.genome.name} · ${binding("capture")}로 길들일 수 있다`);
     return;
   }
 
@@ -1849,6 +1896,7 @@ function openDraw(slot = "hand") {
   deleteMode = false;
   hoverStroke = -1;
   mode = "draw";
+  el.drawBox?.classList?.remove("crafting");
   el.drawLayer.hidden = false;
   el.toolPanel.classList.add("live");
   el.drawTitle.textContent = slot === "shoes" ? "탐사 신발 설계" : slot === "pet" ? "펫 도구 설계" : "손도구 설계";
@@ -1868,6 +1916,7 @@ function closeDraw() {
   mode = "play";
   el.drawLayer.hidden = true;
   el.toolPanel.classList.remove("live");
+  el.drawBox?.classList?.remove("crafting");
   updateHud();
 }
 
@@ -1920,9 +1969,10 @@ function gearCost() {
 }
 
 function confirmDraw() {
+  if (mode !== "draw") return;
   const cost = gearCost();
   if (cost > game.ink) {
-    toast(`잉크가 부족하다 · 필요 ${cost} / 보유 ${game.ink}`, "bad");
+    toast("잉크가 부족하다 · 수집품을 더 찾아보자", "bad");
     return;
   }
   if (draftSlot !== "pet" && totalGear() >= game.maxGear) {
@@ -1931,7 +1981,7 @@ function confirmDraw() {
   }
   const length = drawingLengthState(analyzeStrokes(strokes, PAD_W, PAD_H), game.milestone);
   if (length.exceeded) {
-    toast(`설계 길이가 ${Math.round(length.used - length.budget)}px 초과했다 · 획을 줄여 보자`, "bad");
+    toast("설계 길이 한도를 넘었다 · 획을 줄여 보자", "bad");
     return;
   }
   const gear = buildGear(strokes, draftSlot);
@@ -1947,8 +1997,19 @@ function confirmDraw() {
     else game.tool = gear;
   }
   saveNow();
+  mode = "crafting";
+  craftingTimer = CRAFTING_DURATION;
+  craftingItem = gear;
+  el.drawLayer.hidden = true;
+  el.toolPanel.classList.remove("live");
+  updateHud();
+}
+
+function finishCrafting() {
+  const equipped = craftingItem ?? (draftSlot === "pet" ? game.petTool : draftSlot === "shoes" ? game.shoes : game.tool);
+  craftingItem = null;
   closeDraw();
-  toast(`${gear.name} 제작 및 장착 · 잉크 ${cost} 사용`, "good");
+  toast(`${equipped?.name ?? "도구"} 제작 및 장착 완료`, "good");
 }
 
 function padPoint(e) {
@@ -1993,14 +2054,14 @@ pad.addEventListener("pointermove", e => {
   const length = drawingLengthState(analyzeStrokes(strokes, PAD_W, PAD_H), game.milestone);
   if (length.remaining <= 1) {
     drawing = false;
-    toast(`${length.label} 설계 길이 ${length.budget}px를 모두 사용했다`);
+    toast(`${length.label} 설계 길이 여유를 모두 사용했다`);
     return;
   }
   if (segment > length.remaining) {
     const ratio = length.remaining / segment;
     current.push({ x: tail.x + (p.x - tail.x) * ratio, y: tail.y + (p.y - tail.y) * ratio });
     drawing = false;
-    toast(`${length.label} 설계 길이 ${length.budget}px를 모두 사용했다`);
+    toast(`${length.label} 설계 길이 여유를 모두 사용했다`);
   } else current.push(p);
   renderPad();
   updateHud();
@@ -2139,9 +2200,12 @@ function updateHud() {
     el.toolDura.classList.remove("low");
     const strokeCount = strokes.filter(s => s.length >= 2).length;
     const cost = gearCost();
+    const lengthCue = length.remaining <= length.budget * .12 ? "길이 여유 거의 없음"
+      : length.remaining <= length.budget * .34 ? "길이 여유 보통" : "길이 여유 충분";
+    const inkCue = cost > game.ink ? "잉크가 부족함" : "잉크 여유 있음";
     el.drawBudget.textContent = deleteMode
-      ? `지울 획을 클릭하세요 · 현재 ${strokeCount}획 · 제작비 ${cost}개`
-      : `이번 설계 ${strokeCount}획 · 길이 ${Math.round(length.used)}/${length.budget}px · 제작비 ${cost}개 · 보유 ${game.ink}개`;
+      ? "지울 획을 클릭하세요 · 설계 길이를 가볍게 조정합니다"
+      : `설계 중 · ${lengthCue} · ${inkCue}`;
   } else if (game.tool) {
     el.toolName.textContent = game.tool.name;
     el.toolDura.textContent = `사용 ${game.tool.durability}/${game.tool.maxDurability}`;
@@ -2161,23 +2225,19 @@ function updateHud() {
   el.depth.textContent = game.depth;
   el.captures.textContent = game.captures;
   el.ink.textContent = game.ink;
-  el.shoeName.textContent = game.shoes
-    ? `${game.shoes.name} ${game.shoes.durability}/${game.shoes.maxDurability}`
-    : "기본 장화";
+  el.shoeName.textContent = game.shoes ? game.shoes.name : "기본 장화";
   el.hearts.innerHTML = Array.from({ length: game.maxHp }, (_, i) =>
     `<i class="heart ${i < game.hp ? "full" : "empty"}" aria-hidden="true">♥</i>`
   ).join("");
   el.hearts.setAttribute?.("aria-label", `체력 ${game.hp}/${game.maxHp}`);
   const frontier = nextTierProgress(game.fragments);
-  el.resonance.textContent = `${frontier.tier}등급`;
-  el.fragments.textContent = frontier.next
-    ? `${game.fragments} / ${frontier.next.fragments}`
-    : `${game.fragments} · 완성`;
+  el.resonance.textContent = FRONTIER_LABELS[frontier.tier] ?? "개척자";
+  el.fragments.textContent = frontier.next ? "다음 기술 준비 중" : "모든 기술 완성";
   const env = currentEnvironment();
   const thermal = thermalState(game.temperature);
   el.envTime.textContent = env.period;
   el.envWeather.textContent = env.weather.name;
-  el.envTemp.textContent = `${Math.round(game.temperature)}°C · ${thermal.name}`;
+  el.envTemp.textContent = thermal.name;
   el.envNoise.textContent = noiseLabel(game.noise);
 }
 
@@ -2228,17 +2288,16 @@ function updateMap() {
     mapCtx.fillRect(mx * cell, my * cell, cell, cell);
     mapCtx.fillStyle = "#fff4bd";
     mapCtx.fillRect(mx * cell + 1, my * cell + 1, 2, 2);
-    const distance = Math.round(Math.hypot(rx, ry));
-    el.goalText.textContent = `${compassDirection(rx, ry)}쪽 ${distance}칸 · ${target.name}`;
+    el.goalText.textContent = `${compassDirection(rx, ry)}쪽 · ${target.name}`;
   } else {
-    el.goalText.textContent = "신호기 5개 활성화 완료 · 자유 탐사 중";
+    el.goalText.textContent = "모든 신호기 활성화 완료 · 자유 탐사 중";
   }
 
   mapCtx.fillStyle = "#fff";
   mapCtx.fillRect(Math.floor(cols / 2) * cell + 1, Math.floor(rows / 2) * cell + 1, 2, 2);
   mapCtx.strokeStyle = "#172033";
   mapCtx.strokeRect(Math.floor(cols / 2) * cell, Math.floor(rows / 2) * cell, cell, cell);
-  el.mapCoord.textContent = `${frontierRegionAt(tx, ty).name} · ${tx} · ${ty}`;
+  el.mapCoord.textContent = frontierRegionAt(tx, ty).name;
 }
 
 function updateHint() {
@@ -2252,10 +2311,10 @@ function updateHint() {
     const directions = { north: "북쪽", east: "동쪽", south: "남쪽", west: "서쪽" };
     const weakness = c.weakness && (c.rank === "normal" || c.weaknessExposed)
       ? ` · ${c.weaknessExposed ? `${directions[c.weaknessDirection]} 전용 ` : ""}약점 <b>${WEAKNESS_LABELS[c.weakness]}</b>`
-      : activePart ? ` · 파괴 대상 <b>${activePart.label} ${activePart.hp}/${activePart.maxHp}</b>` : "";
+      : activePart ? ` · 파괴 대상 <b>${activePart.label}</b>` : "";
     const capturable = c.rank === "normal" && c.hp / c.maxHp <= 0.38 ? ` · <b>${binding("capture")}</b> 포획 가능` : "";
-    const disarmed = c.disarmed > 0 ? ` · <b>무장해제 ${c.disarmed.toFixed(1)}초</b>` : "";
-    el.hint.innerHTML = `${rank} ${c.genome.name} · 체력 <b>${c.hp}/${c.maxHp}</b>${weakness}${disarmed} — <b>${binding("attack")}</b> 공격 · <b>${binding("parry")}</b> 패링${capturable}`;
+    const disarmed = c.disarmed > 0 ? " · <b>무장해제 중</b>" : "";
+    el.hint.innerHTML = `${rank} ${c.genome.name}${weakness}${disarmed} — <b>${binding("attack")}</b> 공격 · <b>${binding("parry")}</b> 패링${capturable}`;
     el.hint.hidden = false;
     return;
   }
@@ -2267,7 +2326,7 @@ function updateHint() {
     const ok = have >= rule.threshold;
     el.hint.innerHTML = ok
       ? `${rule.label} — <b>${binding("attack")}</b>로 길 열기`
-      : `${rule.label} — ${rule.need} <b>${rule.threshold.toFixed(2)}</b> (현재 ${have.toFixed(2)})`;
+      : `${rule.label} — ${rule.need} <b>도구 성능이 더 필요하다</b>`;
     el.hint.hidden = false;
     return;
   }
@@ -2278,13 +2337,13 @@ function updateHint() {
     const have = game.tool ? game.tool.stats.grip : 0;
     el.hint.innerHTML = have >= need
       ? `◇ 온순한 크리처 ${c.genome.name} · <b>${binding("capture")}</b>로 길들이기`
-      : `◇ 온순한 크리처 ${c.genome.name} · 필요 포획력 <b>${need.toFixed(2)}</b> / 현재 ${have.toFixed(2)}`;
+      : `◇ 온순한 크리처 ${c.genome.name} · <b>포획력이 더 필요하다</b>`;
     el.hint.hidden = false;
     return;
   }
 
   if (!canFloat() && nearWater()) {
-    el.hint.innerHTML = `깊은 물 · 부력 <b>${WATER_RULE.threshold.toFixed(2)}</b> 이상인 손도구로 건널 수 있음`;
+    el.hint.innerHTML = "깊은 물 · 부력형 손도구가 필요하다";
     el.hint.hidden = false;
     return;
   }
@@ -2352,6 +2411,9 @@ function rewardNotice(text) {
 
 function clearPresentationEffects() {
   revealEffect = null;
+  successEffects = [];
+  craftingTimer = 0;
+  craftingItem = null;
   celebrationTimer = 0;
   rewardNotices = [];
   el.celebration.hidden = true;
@@ -2360,6 +2422,11 @@ function clearPresentationEffects() {
   el.rewardFeed.innerHTML = "";
   lastWeatherSlot = null;
   lastDayPeriod = null;
+}
+
+function successEffect(x, y, kind) {
+  successEffects.push({ x, y, kind, time: kind === "dodge" ? .42 : .58, duration: kind === "dodge" ? .42 : .58 });
+  successEffects = successEffects.slice(-8);
 }
 
 function updateEnvironment(dt) {
@@ -2399,7 +2466,7 @@ function binding(action) {
 
 function updateControlLabels() {
   if (!el.paletteKey) return;
-  el.paletteKey.innerHTML = `<kbd>${binding("attack")}</kbd> 공격 · <kbd>${binding("parry")}</kbd> 패링 · <kbd>${binding("dodge")}</kbd> 회피 · <kbd>${binding("capture")}</kbd> 포획 · <kbd>${binding("challenges")}</kbd> 도전 · <kbd>${binding("map")}</kbd> 지도`;
+  el.paletteKey.innerHTML = `<kbd>${binding("attack")}</kbd> 공격 · <kbd>${binding("parry")}</kbd> 패링 · <kbd>${binding("dodge")}</kbd> 전방 대시 · <kbd>${binding("lockOn")}</kbd> 조준 락온 · <kbd>${binding("capture")}</kbd> 포획 · <kbd>${binding("challenges")}</kbd> 도전 · <kbd>${binding("map")}</kbd> 지도`;
 }
 
 function settingsKeysHtml() {
@@ -2442,11 +2509,10 @@ function showTitle() {
   el.mapPanel.hidden = true;
   el.hint.hidden = true;
   el.overlay.innerHTML = `
-    <div>
-      <h1>Drawn Frontier</h1>
-      <p class="sub">막힌 길은 직접 그린 도구로 연다.<br>
-      그림의 모양이 도구의 성능을 결정한다.</p>
-      <p class="mission">다섯 지역의 신호기를 차례로 활성화하고 새로운 크리처를 발견하세요.<br>뾰족함, 길이, 닫힌 면, 획 수를 조절해 지금 필요한 도구를 만들 수 있습니다.</p>
+    <div class="title-card">
+      <h1 class="crayon-title" aria-label="Drawn Frontier"><span>Drawn</span> <span>Frontier</span></h1>
+      <p class="title-challenge">그림으로 <b>도구</b>를 만들고 <b>개척</b>하기! ✨</p>
+      <p class="mission">화면에 그은 획의 길이, 꺾인 각도, 감싼 넓이, 갈래의 수가 그대로 장비의 성능이 되는 절차 생성 도트 탐험 게임.<br><b>일정 크기의 랜덤 맵을 모두 개척하는 것이 목표!</b></p>
       <div class="row">
         <button data-act="new">새 원정</button>
         ${hasSave ? `<button class="ghost" data-act="continue">원정 계속</button>` : ""}
@@ -2454,7 +2520,8 @@ function showTitle() {
       </div>
       <p class="keys">
         <b>${binding("up")}${binding("left")}${binding("down")}${binding("right")}</b> 이동 · <b>${binding("sprint")}</b> 달리기 · <b>${binding("dodge")}</b> 회피 · <b>${binding("inventory")}</b> 장비 가방 · <b>${binding("challenges")}</b> 도전과제 · <b>${binding("map")}</b> 지도 · <b>${binding("attack")}</b> 방향 공격·사용 · <b>${binding("parry")}</b> 짧은 패링 · <b>${binding("capture")}</b> 포획·길들이기 · <b>${binding("dex")}</b> 크리처 도감<br>
-        해금 기술: <b>${binding("jump")}</b> 점프 · <b>${binding("wire")}</b> 와이어 · <b>${binding("reflector")}</b> 반사 방벽<br>
+        해금 기술: <b>${binding("jump")}</b> 점프 · <b>${binding("wire")}</b> 와이어 · <b>${binding("reflector")}</b> 반사 방벽 · <b>${binding("lockOn")}</b> 조준 방향 고정<br>
+        회피: <b>${binding("dodge")}</b> 바라보는 방향으로 대시 · 락온 중에도 이동은 자유<br>
         손도구: 파쇄력·사거리·부력·포획력 · 신발: 달리기·안정성·내구도
       </p>
     </div>`;
@@ -2467,7 +2534,7 @@ function showWin() {
   el.overlay.innerHTML = `
     <div>
       <h1>모든 신호기를 활성화했다</h1>
-      <p class="sub">신호기 ${game.found.size}/${LANDMARK_COUNT} · 발견한 크리처 ${game.dex.size}종 · 최장 이동 거리 ${game.depth}</p>
+      <p class="sub">모든 신호기와 크리처 기록을 완성했습니다</p>
       <p class="mission">다섯 지역이 모두 지도에 연결되었습니다.<br>이후에도 세계를 계속 탐사하고 새로운 크리처와 장비를 발견할 수 있습니다.</p>
       <div class="row">
         <button data-act="new">다른 시드로 출발</button>
@@ -2483,7 +2550,7 @@ function showDex() {
   el.overlay.innerHTML = `
     <div>
       <h1>크리처 도감</h1>
-      <p class="sub">발견한 크리처 ${entries.length}종</p>
+      <p class="sub">발견한 크리처 기록</p>
       ${entries.length
         ? `<div class="dex">${entries.map(e =>
             `<div class="dex-entry"><div class="nm">${e.hostile ? "⚠ " : "◇ "}${e.name}</div><div class="bi">${e.rank === "fieldboss" ? "영역 지배자 처치" : e.rank === "midboss" ? "지역 우두머리 처치" : e.defeated ? "적대 크리처 처치" : e.ranged ? "원거리 크리처 포획" : e.hostile ? "적대 크리처 포획" : "온순한 크리처 길들임"} · ${e.biome}</div></div>`
@@ -2502,7 +2569,7 @@ function showWorldMap() {
   el.overlay.innerHTML = `
     <div class="world-map-wrap">
       <h1>세계 지도</h1>
-      <p class="sub">${currentRegion.name} · 좌표 ${playerTx}, ${playerTy} · 신호기 ${game.found.size}/5 · 접근 가능 지역 ${Math.min(5, game.found.size + 1)}개</p>
+      <p class="sub">${currentRegion.name} · 신호기와 지형을 확인하세요</p>
       <canvas id="world-map" width="256" height="176" aria-label="세계 지도"></canvas>
       <div class="row"><button class="ghost" data-act="keep">지도 닫기 <kbd>${binding("map")}</kbd></button></div>
     </div>`;
@@ -2603,14 +2670,14 @@ function inventoryCards() {
 }
 
 function rotatingTipHtml() {
-  const index = Math.floor((game?.time ?? 0) / 2000) % ROTATING_TIPS.length;
+  const index = Math.floor((game?.time ?? 0) / TIP_ROTATION_MS) % ROTATING_TIPS.length;
   return `<div class="rotating-tip"><b>TIP</b><span id="rotating-tip">${ROTATING_TIPS[index]}</span></div>`;
 }
 
 function updateRotatingTip() {
   const tip = document.getElementById("rotating-tip");
   if (!tip || !game) return;
-  tip.textContent = ROTATING_TIPS[Math.floor(game.time / 2000) % ROTATING_TIPS.length];
+  tip.textContent = ROTATING_TIPS[Math.floor(game.time / TIP_ROTATION_MS) % ROTATING_TIPS.length];
 }
 
 function showChallenges() {
@@ -2625,10 +2692,10 @@ function showChallenges() {
       <p class="sub">한 번에 바로 다음 목표만 안내합니다. 완료 기록은 아래에서 언제든 확인할 수 있습니다.</p>
       <table class="challenge-table">
         <thead><tr><th>다음 도전과제</th><th>진행</th><th>해금 보상</th></tr></thead>
-        <tbody>${next ? `<tr><td><b>${next.title}</b></td><td>${next.current}/${next.target}</td><td>${next.reward}</td></tr>` : `<tr><td colspan="3"><b>모든 핵심 도전과제 완료</b> · 자유 탐사 중</td></tr>`}</tbody>
+      <tbody>${next ? `<tr><td><b>${next.title}</b></td><td>진행 중</td><td>${next.reward}</td></tr>` : `<tr><td colspan="3"><b>모든 핵심 도전과제 완료</b> · 자유 탐사 중</td></tr>`}</tbody>
       </table>
       <details class="completed-challenges" ${completed.length ? "" : "open"}>
-        <summary>해금 완료 목록 ${completed.length}개</summary>
+        <summary>해금 완료 목록</summary>
         ${completed.length ? `<ul>${completed.map(row => `<li><span>${row.title}</span><b>${row.reward}</b></li>`).join("")}</ul>` : `<p>아직 완료한 도전과제가 없습니다.</p>`}
       </details>
       ${rotatingTipHtml()}
@@ -2652,9 +2719,10 @@ function showPalette(page = palettePage) {
       <span class="ready"><kbd>${binding("map")}</kbd> 확장 지도</span>
       <span class="ready"><kbd>${binding("parry")}</kbd> 짧은 패링</span>
       <span class="ready"><kbd>${binding("dodge")}</kbd> 회피 · 약점 와이어</span>
-      <span class="${progressionEffects(game.frontierTier).jump ? "ready" : "locked"}"><kbd>${binding("jump")}</kbd> 점프 · 등급 2</span>
-      <span class="${progressionEffects(game.frontierTier).wire ? "ready" : "locked"}"><kbd>${binding("wire")}</kbd> 와이어 · 등급 4</span>
-      <span class="${progressionEffects(game.frontierTier).reflector ? "ready" : "locked"}"><kbd>${binding("reflector")}</kbd> 반사 방벽 · 등급 5</span>
+      <span class="ready"><kbd>${binding("lockOn")}</kbd> 가까운 상대 락온</span>
+      <span class="${progressionEffects(game.frontierTier).jump ? "ready" : "locked"}"><kbd>${binding("jump")}</kbd> 점프 · 해금 기술</span>
+      <span class="${progressionEffects(game.frontierTier).wire ? "ready" : "locked"}"><kbd>${binding("wire")}</kbd> 와이어 · 해금 기술</span>
+      <span class="${progressionEffects(game.frontierTier).reflector ? "ready" : "locked"}"><kbd>${binding("reflector")}</kbd> 반사 방벽 · 해금 기술</span>
     </div>
     <div class="gear-sections">
       <section class="gear-section">
@@ -2805,7 +2873,7 @@ el.overlay.addEventListener("click", e => {
     const itemKey = btn.dataset.item;
     if (dropInventoryItem(itemKey)) {
       hideOverlay();
-      toast(`${ITEM_DEFS[itemKey].name} 1개를 내려놓았다 · 10초 안에 다시 주울 수 있다`);
+      toast(`${ITEM_DEFS[itemKey].name}을 내려놓았다 · 잠시 동안 다시 주울 수 있다`);
     }
     return;
   }
@@ -2848,7 +2916,7 @@ el.overlay.addEventListener("click", e => {
     dirty = true;
     save();
     hideOverlay();
-    toast("첫 길을 살펴보고 Q로 필요한 도구를 설계하자");
+    toast(`첫 길을 살펴보고 ${binding("draw")}로 필요한 도구를 설계하자`);
   } else if (act === "continue") {
     game = loadSave() ?? newGame((Math.random() * 2 ** 31) >>> 0);
     creatures.clear();
@@ -2898,6 +2966,15 @@ window.addEventListener("keydown", e => {
   }
   keys.add(e.code);
   if (e.repeat) return;
+
+  if (mode === "crafting") {
+    if (e.code === "Escape" || e.code === "Enter") finishCrafting();
+    else if (action === "inventory") {
+      finishCrafting();
+      showPalette("gear");
+    }
+    return;
+  }
 
   if (mode === "draw") {
     if (e.code === "Enter") confirmDraw();
@@ -2956,6 +3033,7 @@ window.addEventListener("keydown", e => {
   else if (action === "dodge") tryDodge();
   else if (action === "wire") useWire();
   else if (action === "reflector") useReflector();
+  else if (action === "lockOn") toggleLockOn();
 });
 
 window.addEventListener("keyup", e => keys.delete(e.code));
@@ -2979,6 +3057,7 @@ function updateImpact(dt) {
 }
 
 function movePlayer(dt) {
+  const lockedFacing = updateLockedFacing();
   if (game.bindTimer > 0) {
     game.walking = false;
     game.running = false;
@@ -3001,6 +3080,11 @@ function movePlayer(dt) {
   if (!game.walking) return;
 
   const len = Math.hypot(dx, dy) || 1;
+  if (!lockedFacing && game.dodgeTimer <= 0) {
+    game.faceX = dx / len;
+    game.faceY = dy / len;
+    if (dx !== 0) game.facing = dx > 0 ? 1 : -1;
+  }
   const shoe = game.shoes?.shoeStats ?? null;
   const frontierBoost = progressionEffects(game.frontierTier).sprintBonus;
   const thermal = thermalState(game.temperature);
@@ -3014,10 +3098,6 @@ function movePlayer(dt) {
   const nx = game.px + (dx / len) * step;
   const ny = game.py + (dy / len) * step;
 
-  game.faceX = Math.sign(dx);
-  game.faceY = Math.sign(dy);
-  if (dx !== 0) game.facing = dx > 0 ? 1 : -1;
-
   // 축을 나눠 검사하면 벽을 따라 미끄러진다.
   const lockX = regionRequiredMarksAt(Math.floor(nx / TILE), Math.floor(game.py / TILE)) > game.found.size;
   const lockY = regionRequiredMarksAt(Math.floor(game.px / TILE), Math.floor(ny / TILE)) > game.found.size;
@@ -3027,11 +3107,7 @@ function movePlayer(dt) {
   if (!blockY) game.py = ny;
   if (game.jumpTimer <= 0 && (blockX === "bramble" || blockY === "bramble")) hurtPlayer("가시덩굴");
   if ((blockX === "frontier" || blockY === "frontier") && el.toast.hidden) {
-    const required = Math.max(
-      regionRequiredMarksAt(Math.floor(nx / TILE), Math.floor(game.py / TILE)),
-      regionRequiredMarksAt(Math.floor(game.px / TILE), Math.floor(ny / TILE))
-    );
-    toast(`다음 지역은 아직 잠겨 있다 · 신호기 ${required}개를 먼저 활성화하자`, "bad");
+    toast("다음 지역은 아직 잠겨 있다 · 앞선 신호기를 먼저 활성화하자", "bad");
   }
   const moved = Math.hypot(game.px - beforeX, game.py - beforeY);
   wearShoes(moved);
@@ -3098,9 +3174,15 @@ function drawReflectorWard(sx, sy) {
 function render() {
   const limited = preferences.animation === "limited";
   const visualTime = limited ? Math.floor(game.time / 240) * 240 : game.time;
+  const reveal = mode === "crafting" ? Math.sin((CRAFTING_DURATION - craftingTimer) / CRAFTING_DURATION * Math.PI) : 0;
+  const zoom = 1 + reveal * .16;
   const shake = limited ? 0 : game.screenShake > 0 ? game.screenShake * 5 : 0;
-  const camX = Math.round(game.px - W / 2 + Math.sin(visualTime * .085) * shake);
-  const camY = Math.round(game.py - H / 2 + Math.cos(visualTime * .13) * shake);
+  const camX = Math.round(game.px - W / (2 * zoom) + Math.sin(visualTime * .085) * shake);
+  const camY = Math.round(game.py - H / (2 * zoom) + Math.cos(visualTime * .13) * shake);
+  ctx.save();
+  ctx.translate(W / 2, H / 2);
+  ctx.scale(zoom, zoom);
+  ctx.translate(-W / 2, -H / 2);
 
   drawTerrain(ctx, camX, camY, W, H, game.seed, game.cleared, game.found.size, visualTime);
   drawDroppedItems(camX, camY);
@@ -3135,7 +3217,7 @@ function render() {
       const sx = d.c.x - camX;
       const sy = d.c.y - camY;
       if (sx < -20 || sy < -20 || sx > W + 20 || sy > H + 20) continue;
-      drawCreature(ctx, { ...d.c, isPet: d.kind === "pet" }, Math.round(sx), Math.round(sy), visualTime);
+      drawCreature(ctx, { ...d.c, isPet: d.kind === "pet", lockedTarget: d.kind === "creature" && game.lockTargetKey === creatureKey(d.c) }, Math.round(sx), Math.round(sy), visualTime);
     } else if (d.kind === "villager") {
       drawVillager(ctx, d.c, d.c.x - camX, d.c.y - camY, visualTime);
     } else {
@@ -3144,14 +3226,19 @@ function render() {
       const jumpOffset = game.jumpTimer > 0 ? Math.sin(jumpProgress * Math.PI) * 9 : 0;
       const sy = game.py - camY - jumpOffset;
       const deathProgress = deathState ? clamp(1 - deathState.timer / 1.15, 0, 1) : 0;
-      drawPlayer(ctx, sx, sy, game.faceX, game.faceY, game.walking, visualTime, game.jumpTimer <= 0 && isAfloat(), game.running, game.shoes, game.hurt, deathProgress, game.bindTimer, game.dodgeTimer);
-      drawHeldTool(ctx, game.tool, sx, sy, game.faceX, game.faceY, game.swing);
+      const craftingProgress = mode === "crafting" ? clamp(1 - craftingTimer / CRAFTING_DURATION, 0, 1) : 0;
+      drawPlayer(ctx, sx, sy, game.faceX, game.faceY, game.walking, visualTime, game.jumpTimer <= 0 && isAfloat(), game.running, game.shoes, game.hurt, deathProgress, game.bindTimer, game.dodgeTimer, craftingProgress);
+      if (mode === "crafting") drawCraftingReveal(ctx, craftingItem, sx, sy, craftingProgress);
+      else drawHeldTool(ctx, game.tool, sx, sy, game.faceX, game.faceY, game.swing);
       drawParryEffect(ctx, sx, sy, game.faceX, game.faceY, game.parryTimer, game.parryCooldown, game.parryFlash);
       drawReflectorWard(sx, sy);
     }
   }
 
   drawSmokeEffects(ctx, smokeEffects, camX, camY);
+  drawSuccessEffects(ctx, successEffects, camX, camY);
+
+  ctx.restore();
 
   drawAtmosphere(ctx, W, H, currentEnvironment(), visualTime);
   drawVignette(ctx, W, H, game.hurt);
@@ -3169,6 +3256,7 @@ function frame(now) {
 
   if (!game) return;
   game.time = now;
+  successEffects = successEffects.filter(effect => (effect.time -= dt) > 0);
   updateRotatingTip();
 
   if (deathState && !deathState.opened) {
@@ -3217,6 +3305,9 @@ function frame(now) {
 
     saveTimer -= dt;
     if (dirty && saveTimer <= 0) { save(); dirty = false; saveTimer = 1.5; }
+  } else if (mode === "crafting") {
+    craftingTimer -= dt;
+    if (craftingTimer <= 0) finishCrafting();
   }
 
   render();

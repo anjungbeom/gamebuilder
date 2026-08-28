@@ -7,7 +7,7 @@ import {
   villagePositions
 } from "../src/world.js";
 import { buildGenome, bodyPlan } from "../src/creature.js";
-import { drawCreature } from "../src/render.js";
+import { drawCreature, drawPlayer, drawCraftingReveal } from "../src/render.js";
 import {
   creatureMaxHp, bossWeakness, attackDamage, captureThresholdAtHp,
   inAttackArc, parryDisarmDuration, directionalWeaknessAllows,
@@ -244,6 +244,19 @@ test("키 재설정은 충돌 키를 교환하고 설정값을 안전하게 정�
   assert.equal(actionForCode(changed, "Space"), "parry");
   assert.equal(keyLabel("KeyK"), "K");
   assert.equal(normalizePreferences({ animation: "limited" }).animation, "limited");
+  assert.equal(DEFAULT_KEYMAP.dodge, "Slash");
+  assert.equal(DEFAULT_KEYMAP.dodgeLeft, undefined);
+  assert.equal(DEFAULT_KEYMAP.dodgeRight, undefined);
+});
+
+test("플레이어 손과 제작 완료 들어 올리기 연출은 도트 캔버스에서 안전하게 그려진다", () => {
+  const ctx = new Proxy({ canvas: { width: 384, height: 216 } }, {
+    get: (target, key) => key in target ? target[key] : () => {},
+    set: (target, key, value) => ((target[key] = value), true)
+  });
+  const tool = { color: "#ffd166", strokes: [[{ x: -4, y: 0 }, { x: 4, y: 0 }]] };
+  assert.doesNotThrow(() => drawPlayer(ctx, 100, 100, 1, 0, false, 0, false, false, null, 0, 0, 0, 0, .5));
+  assert.doesNotThrow(() => drawCraftingReveal(ctx, tool, 100, 100, .5));
 });
 
 test("각 신호기에는 육지 우두머리가 있고 마지막 개체만 영역 지배자다", () => {

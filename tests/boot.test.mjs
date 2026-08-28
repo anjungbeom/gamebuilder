@@ -76,6 +76,10 @@ test("타이틀에서 새 세계를 시작하고 프레임이 돈다", () => {
   const overlay = getEl("overlay");
   const click = overlay._handlers.get("click");
   assert.equal(typeof click, "function");
+  assert.match(overlay.innerHTML, /crayon-title/);
+  assert.match(overlay.innerHTML, /그림으로 <b>도구<\/b>를 만들고 <b>개척<\/b>하기! ✨/);
+  assert.match(overlay.innerHTML, /일정 크기의 랜덤 맵을 모두 개척하는 것이 목표!/);
+  assert.doesNotMatch(overlay.innerHTML, /막힌 길은 직접/);
   const btn = makeEl(); btn.dataset.act = "new";
   click({ target: { closest: () => btn } });
 
@@ -130,7 +134,7 @@ test("도구를 그려 확정하면 저장에 남는다", () => {
   down(key("Enter"));
 
   let t = 4000;
-  for (let i = 0; i < 40; i++) { frameCb(t); t += 16; }
+  for (let i = 0; i < 80; i++) { frameCb(t); t += 16; }
 
   const save = JSON.parse(store.get("drawn-frontier-v2"));
   assert.ok(save.tool, "확정한 도구가 저장되어야 한다");
