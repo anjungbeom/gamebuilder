@@ -1,8 +1,8 @@
 // 유전자 숫자 몇 개로 생물 한 마리를 조립한다.
 // 스프라이트를 그려 두지 않는다. 모든 크리처는 시드에서 자란다.
 
-import { mulberry32, clamp } from "./rng.js";
-import { BIOME } from "./world.js";
+import { mulberry32, clamp } from "./rng.js?rev=9";
+import { BIOME } from "./world.js?rev=9";
 
 /** 바이옴이 색과 성격의 바탕을 정한다. 환경에 적응한 것처럼 보이게 하는 장치. */
 const BIOME_TRAITS = {

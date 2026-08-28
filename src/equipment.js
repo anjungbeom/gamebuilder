@@ -1,4 +1,4 @@
-import { clamp } from "./rng.js";
+import { clamp } from "./rng.js?rev=9";
 
 const TYPES = {
   edge: { key: "breaker", label: "파쇄형", bonus: "파쇄력 +12% · 충격 강화" },

@@ -12,7 +12,7 @@ export const KEY_ACTIONS = [
   { id: "capture", label: "포획·길들이기", code: "KeyF" },
   { id: "inventory", label: "장비 가방", code: "Tab" },
   { id: "dex", label: "크리처 도감", code: "KeyC" },
-  { id: "map", label: "세계 지도", code: "KeyM" },
+  { id: "map", label: "개척 지도", code: "KeyM" },
   { id: "challenges", label: "도전과제", code: "KeyV" },
   { id: "jump", label: "점프", code: "ArrowUp" },
   { id: "wire", label: "와이어", code: "KeyE" },

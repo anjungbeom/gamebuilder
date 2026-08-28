@@ -1,10 +1,10 @@
 // 세계를 도트로 그린다. 글자는 캔버스가 아니라 DOM이 맡는다.
 
 import {
-  TILE, BIOME, OBSTACLE, biomeAt, obstacleAt, isWater, isBiomeSolid, regionRequiredMarksAt
-} from "./world.js";
-import { hashUnit } from "./rng.js";
-import { bodyPlan } from "./creature.js";
+  TILE, BIOME, OBSTACLE, biomeAt, obstacleAt, isWater, isBiomeSolid, isLockedTile, isInsideWorld
+} from "./world.js?rev=9";
+import { hashUnit } from "./rng.js?rev=9";
+import { bodyPlan } from "./creature.js?rev=9";
 
 // 타일마다 색을 크게 흔들면 체커보드처럼 보인다.
 // 바탕색을 반복해 넣어 대부분의 타일이 같은 색을 쓰게 하고, 편차는 좁게 둔다.
@@ -37,7 +37,13 @@ export function drawTerrain(ctx, camX, camY, viewW, viewH, seed, cleared, foundC
       const sx = Math.round(tx * TILE - camX);
       const sy = Math.round(ty * TILE - camY);
 
-      const locked = regionRequiredMarksAt(tx, ty) > foundCount;
+      // 원정의 경계 밖. 지형을 그리지 않고 안개 낀 허공으로 남긴다.
+      if (!isInsideWorld(tx, ty)) {
+        drawWorldEdge(ctx, sx, sy, tx, ty, seed, time);
+        continue;
+      }
+
+      const locked = isLockedTile(tx, ty, foundCount);
 
       ctx.fillStyle = tileColor(tx, ty, seed);
       ctx.fillRect(sx, sy, TILE, TILE);
@@ -54,6 +60,16 @@ export function drawTerrain(ctx, camX, camY, viewW, viewH, seed, cleared, foundC
       if (locked) drawMovingFog(ctx, sx, sy, tx, ty, seed, time);
     }
   }
+}
+
+/** 경계 밖은 개척할 땅이 아니다. 지형 대신 흐릿한 여백으로 둔다. */
+function drawWorldEdge(ctx, sx, sy, tx, ty, seed, time) {
+  const grain = hashUnit(tx, ty, seed + 70003);
+  ctx.fillStyle = `rgb(${18 + Math.round(grain * 8)},${24 + Math.round(grain * 9)},${34 + Math.round(grain * 10)})`;
+  ctx.fillRect(sx, sy, TILE, TILE);
+  const wave = Math.sin(time * .0011 + tx * .31 + ty * .23) * .5 + .5;
+  ctx.fillStyle = `rgba(150,178,200,${(.03 + wave * .05).toFixed(3)})`;
+  ctx.fillRect(sx + 1, sy + 4 + Math.round(wave * 3), TILE - 2, 3);
 }
 
 function drawMovingFog(ctx, sx, sy, tx, ty, seed, time) {

@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildGenome } from "../src/creature.js";
-import { TILE, villagePositions } from "../src/world.js";
+import { TILE, villagePositions, explorationPlan, exploreCellIndex } from "../src/world.js";
 
 function makeEl(id = "") {
   const el = {
@@ -101,7 +101,7 @@ test("이동 입력이 좌표를 바꾸고 자동 저장이 남는다", () => {
   const raw = store.get("drawn-frontier-v2");
   assert.ok(raw, "자동 저장이 있어야 한다");
   const save = JSON.parse(raw);
-  assert.equal(save.v, 2);
+  assert.equal(save.v, 3);
   assert.ok(Number.isFinite(save.px));
   assert.equal(save.faceX, 1, "마지막 이동 방향이 저장되어야 한다");
   assert.equal(save.faceY, 0);
@@ -242,7 +242,7 @@ test("탐사 기술 해금 후 점프·지도·반사 잉크·10초 드롭 회�
     down(key("KeyX"));
     down(key("KeyM"));
   });
-  assert.match(overlay.innerHTML, /세계 지도/);
+  assert.match(overlay.innerHTML, /개척 지도/);
   down(key("KeyM"));
 
   down(key("KeyR"));
@@ -415,4 +415,140 @@ test("환경설정에서 패링 키와 제한 애니메이션을 바꾸고 저�
   click({ target: { closest: () => confirmBtn } });
   assert.equal(store.has("drawn-frontier-v2"), false);
   assert.equal(JSON.parse(store.get("drawn-frontier-settings-v1")).keymap.parry, "KeyK", "캐시 초기화 후에도 키 설정은 유지된다");
+});
+
+
+// ---- 개척률과 터치 조작 -----------------------------------------------------
+
+test("이동하면 개척률이 오르고 저장에 개척 격자가 남는다", () => {
+  const overlay = getEl("overlay");
+  const click = overlay._handlers.get("click");
+  const down = winHandlers.get("keydown");
+  const up = winHandlers.get("keyup");
+
+  const newBtn = makeEl(); newBtn.dataset.act = "new";
+  click({ target: { closest: () => newBtn } });
+
+  let t = 90000;
+  for (let i = 0; i < 10; i++) { frameCb(t); t += 16; }
+  const startPercent = Number.parseInt(getEl("p-explored").textContent, 10);
+  assert.ok(Number.isFinite(startPercent), "개척률이 HUD에 숫자로 표시되어야 한다");
+  assert.ok(startPercent > 0, "시작하자마자 주변은 개척된 상태여야 한다");
+
+  down(key("KeyW"));
+  for (let i = 0; i < 400; i++) { frameCb(t); t += 16; }
+  up(key("KeyW"));
+  down(key("KeyA"));
+  for (let i = 0; i < 400; i++) { frameCb(t); t += 16; }
+  up(key("KeyA"));
+
+  const percent = Number.parseInt(getEl("p-explored").textContent, 10);
+  assert.ok(percent >= startPercent, `개척률이 줄면 안 된다 ${startPercent} -> ${percent}`);
+
+  const save = JSON.parse(store.get("drawn-frontier-v2"));
+  assert.equal(save.v, 3);
+  assert.equal(typeof save.explored, "string", "개척 격자는 문자열로 눌러 담는다");
+  assert.ok(save.explored.length > 0);
+});
+
+test("개척 기록이 없던 v2 저장도 이어서 진행할 수 있다", () => {
+  const overlay = getEl("overlay");
+  const click = overlay._handlers.get("click");
+  const legacy = JSON.parse(store.get("drawn-frontier-v2"));
+  legacy.v = 2;
+  delete legacy.explored;
+  store.set("drawn-frontier-v2", JSON.stringify(legacy));
+
+  const continueBtn = makeEl(); continueBtn.dataset.act = "continue";
+  click({ target: { closest: () => continueBtn } });
+
+  let t = 140000;
+  for (let i = 0; i < 10; i++) { frameCb(t); t += 16; }
+  assert.equal(getEl("overlay").hidden, true, "이어하기가 실제로 시작되어야 한다");
+
+  const save = JSON.parse(store.get("drawn-frontier-v2"));
+  assert.equal(save.v, 3, "다시 저장할 때는 새 형식으로 올라간다");
+  assert.equal(save.seed, legacy.seed, "같은 세계를 이어간다");
+});
+
+test("터치 스틱과 버튼이 키보드와 같은 동작을 부른다", () => {
+  const layer = getEl("touch-controls");
+  const stick = getEl("touch-stick");
+  assert.equal(typeof stick._handlers.get("pointerdown"), "function");
+
+  // 손가락 입력을 처음 본 순간 조작판이 열린다.
+  layer.hidden = true;
+  winHandlers.get("pointerdown")({ pointerType: "touch" });
+  assert.equal(layer.hidden, false, "터치가 감지되면 조작판이 열려야 한다");
+
+  const before = { x: 0, y: 0 };
+  const beforeSave = JSON.parse(store.get("drawn-frontier-v2"));
+  before.x = beforeSave.px;
+
+  // 스틱을 오른쪽 끝까지: 오른쪽으로 달린다.
+  // 스텁 요소의 사각형은 0,0에서 384x216이므로 중심은 (192,108)이다.
+  stick._handlers.get("pointerdown")({ pointerId: 3, clientX: 380, clientY: 108, preventDefault() {} });
+  let t = 200000;
+  for (let i = 0; i < 200; i++) { frameCb(t); t += 16; }
+  stick._handlers.get("pointerup")({ pointerId: 3 });
+
+  const afterSave = JSON.parse(store.get("drawn-frontier-v2"));
+  assert.ok(afterSave.px > before.x, `스틱으로 오른쪽으로 이동해야 한다 ${before.x} -> ${afterSave.px}`);
+
+  // 얼굴 버튼은 키보드와 같은 진입점을 쓴다.
+  const target = (action, extra = {}) => {
+    const button = makeEl();
+    button.dataset.touchAction = action;
+    return { closest: sel => (sel === "[data-touch-action]" ? button : extra[sel] ?? null) };
+  };
+
+  // 메뉴 버튼이 시트를 열고 닫는다.
+  const menu = getEl("touch-menu");
+  menu.hidden = true;
+  getEl("touch-menu-open")._handlers.get("pointerdown")({ preventDefault() {} });
+  assert.equal(menu.hidden, false, "메뉴 버튼이 시트를 열어야 한다");
+
+  // 시트에서 고른 동작은 시트를 닫고 실행된다. 설계는 그리기 화면을 연다.
+  menu._handlers.get("pointerdown")({ target: target("draw"), preventDefault() {} });
+  assert.equal(menu.hidden, true, "동작을 고르면 시트가 닫혀야 한다");
+  assert.equal(getEl("draw-layer").hidden, false, "설계는 그리기 화면을 열어야 한다");
+  winHandlers.get("keydown")(key("Escape"));
+});
+
+test("모바일에서는 HUD 패널이 캔버스 아래 정보판으로 내려간다", () => {
+  const dock = getEl("hud-dock");
+  assert.equal(dock.hidden, false, "터치 조작이 열리면 정보판도 열린다");
+  const docked = dock.children.map(child => child.id);
+  for (const id of ["tool-panel", "vitals", "map-panel", "progress"]) {
+    assert.ok(docked.includes(id), `${id}가 정보판으로 옮겨져야 한다`);
+  }
+});
+
+
+test("신호기를 다 켜고 마지막 칸을 밝히면 원정이 끝난다", () => {
+  const overlay = getEl("overlay");
+  const click = overlay._handlers.get("click");
+  const save = JSON.parse(store.get("drawn-frontier-v2"));
+
+  // 시작 셀 하나만 남기고 전부 밝혀 둔 저장을 만든다.
+  const plan = explorationPlan(save.seed);
+  const startCell = exploreCellIndex(0, 0);
+  const bytes = new Uint8Array(Math.ceil(plan.cells.length / 8));
+  for (let index = 0; index < plan.cells.length; index++) {
+    if (plan.cells[index] && index !== startCell) bytes[index >> 3] |= 1 << (index & 7);
+  }
+  save.explored = Buffer.from(bytes).toString("base64");
+  save.found = [0, 1, 2, 3, 4];
+  save.lastVillageIndex = 0;
+  store.set("drawn-frontier-v2", JSON.stringify(save));
+
+  const continueBtn = makeEl(); continueBtn.dataset.act = "continue";
+  click({ target: { closest: () => continueBtn } });
+
+  let t = 260000;
+  for (let i = 0; i < 30; i++) { frameCb(t); t += 16; }
+
+  assert.match(overlay.innerHTML, /이 땅을 모두 개척했다/);
+  assert.match(overlay.innerHTML, /개척률 100%/);
+  assert.equal(overlay.hidden, false);
 });

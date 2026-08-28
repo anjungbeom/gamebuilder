@@ -1,6 +1,6 @@
 // 크리처 전투 수치와 보스 약점 판정을 게임 상태에서 분리한다.
 
-import { clamp } from "./rng.js";
+import { clamp } from "./rng.js?rev=9";
 
 export const WEAKNESS_LABELS = {
   edge: "절단",

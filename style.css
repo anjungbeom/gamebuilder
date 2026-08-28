@@ -420,7 +420,8 @@ kbd {
 .dex-entry .bi { color: var(--dim); font-size: 0.85em; }
 .dex-empty { color: var(--dim); margin-top: 14px; font-size: clamp(9px, 1.4cqw, 14px); }
 .world-map-wrap { width: min(94%, 760px); }
-#world-map { display: block; width: min(100%, 640px); height: auto; margin: 10px auto 0; border: 1px solid rgba(230,240,255,.3); image-rendering: pixelated; }
+/* 원정 전체가 한 화면에 들어오는 정사각 지도. 화면 높이를 넘지 않게 묶어 둔다. */
+#world-map { display: block; width: min(100%, 46vh, 420px); height: auto; aspect-ratio: 1; margin: 10px auto 0; border: 1px solid rgba(230,240,255,.3); image-rendering: pixelated; }
 
 .palette-wrap { width: min(94%, 760px); }
 .palette-summary { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; margin: 11px 0; }
@@ -864,4 +865,246 @@ body.limited-motion *::after { animation-duration: 1ms !important; animation-ite
 @media (prefers-reduced-motion: reduce) {
   .draw-keys button,
   #overlay button { transition: none; }
+  /* 애니메이션도 함께 멈춘다. 설정에서 끄기 전에도 OS 설정을 따른다. */
+  .toast,
+  .celebration,
+  .reward-chip,
+  .challenge-row,
+  .crayon-title span,
+  .crayon-title::after,
+  #overlay .crayon-swipe { animation: none !important; }
+  .fill, .dura-meter i { transition: none; }
 }
+
+/* ---- 포커스 ---- */
+/* 키보드 조작이 지금 어디에 있는지 항상 보여야 한다. */
+:where(button, [href], input, select, textarea, [tabindex]):focus-visible {
+  outline: 3px solid var(--sun, #ffd65a);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+#overlay button:focus-visible,
+.draw-keys button:focus-visible,
+.touch-menu-grid button:focus-visible,
+.face:focus-visible {
+  outline-color: #177bbb;
+}
+
+/* ---- 터치 조작 (세로 화면 전용) ---- */
+/* 손가락 입력이 감지된 화면에서만 열린다. 데스크톱에서는 존재하지 않는 것과 같다. */
+
+/* 캔버스 · 정보판 · 조작판을 위에서 아래로 세운다. */
+#frame:has(#touch-controls:not([hidden])) {
+  /* 캔버스는 위, 조작판은 엄지가 닿는 아래. 정보판은 그 사이를 채운다. */
+  align-content: space-between;
+  justify-items: center;
+  gap: 8px;
+  padding: 8px 8px 12px;
+  overflow-y: auto;
+}
+#frame:has(#touch-controls:not([hidden])) #stage {
+  width: min(100%, calc(100vw - 16px));
+}
+
+/* 정보판: 화면을 덮던 HUD 패널이 여기로 내려온다. */
+#hud-dock {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  width: min(100%, calc(100vw - 16px));
+  font-size: 12px;
+}
+#hud-dock[hidden] { display: none; }
+#hud-dock .panel {
+  position: static;
+  inset: auto;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  font-size: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  backdrop-filter: none;
+  pointer-events: auto;
+}
+#hud-dock #tool-panel { grid-column: 1 / -1; }
+#hud-dock #vitals { grid-column: 1; }
+#hud-dock #map-panel { grid-column: 2; width: 108px; }
+#hud-dock #progress { grid-column: 1 / -1; justify-content: space-between; gap: 4px; }
+#hud-dock #progress > div { min-width: 0; }
+/* 캔버스 밖으로 나오면 HUD 등급 규칙이 걸리지 않아 숫자가 다시 보인다. */
+#hud-dock #progress b { display: block; font-size: 15px; }
+#hud-dock #progress span { display: block; font-size: 10px; }
+#hud-dock .palette-key { display: none; }
+#hud-dock .bar-row { margin-top: 4px; }
+#hud-dock #minimap { width: 100%; }
+
+/* 조작판: 왼손 스틱, 오른손 얼굴 버튼. */
+#touch-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: min(100%, calc(100vw - 16px));
+  padding: 10px 12px;
+  border: 2px solid var(--stroke);
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: var(--pixel-shadow);
+  touch-action: none;
+  user-select: none;
+}
+#touch-controls[hidden] { display: none; }
+
+#touch-stick {
+  position: relative;
+  flex: 0 0 auto;
+  width: 132px;
+  height: 132px;
+  border-radius: 50%;
+  border: 2px solid var(--stroke);
+  background: rgba(140, 229, 194, 0.22);
+  touch-action: none;
+}
+#touch-stick::after {
+  content: "";
+  position: absolute;
+  inset: 30px;
+  border-radius: 50%;
+  border: 1px dashed rgba(51, 65, 92, 0.32);
+}
+#touch-nub {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 52px;
+  height: 52px;
+  margin: -26px 0 0 -26px;
+  border-radius: 50%;
+  border: 2px solid var(--stroke);
+  background: var(--paper);
+  box-shadow: 2px 2px 0 rgba(51, 65, 92, 0.22);
+}
+
+/* ABXY 배치: 사용을 아래, 패링을 오른쪽, 회피를 왼쪽, 와이어를 위에 둔다. */
+.touch-face {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: repeat(3, 52px);
+  grid-template-rows: repeat(3, 44px);
+  gap: 4px;
+  align-items: center;
+  justify-items: center;
+}
+.face {
+  width: 100%;
+  height: 100%;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--ink);
+  background: var(--paper);
+  border: 2px solid var(--stroke);
+  border-radius: 50%;
+  box-shadow: 2px 2px 0 rgba(51, 65, 92, 0.2);
+  touch-action: none;
+}
+.face:active { transform: translate(1px, 1px); box-shadow: 1px 1px 0 rgba(51, 65, 92, 0.2); }
+.face-y { grid-area: 1 / 2; background: #e6f7ff; }
+.face-x { grid-area: 2 / 1; background: #f1edff; }
+.face-b { grid-area: 2 / 3; background: #fff4c8; }
+.face-a { grid-area: 3 / 2; background: #ffe8e3; font-size: 13px; }
+.face-lock { grid-area: 1 / 1; font-size: 11px; }
+.face-menu { grid-area: 3 / 3; font-size: 11px; border-radius: 10px; background: #eef2f6; }
+
+/* 나머지 조작을 모은 시트 */
+#touch-menu {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(15, 24, 38, 0.45);
+}
+#touch-menu[hidden] { display: none; }
+.touch-menu-sheet {
+  width: min(100%, 520px);
+  margin: 0 8px 8px;
+  padding: 14px;
+  border: 2px solid var(--stroke);
+  border-radius: 16px;
+  background: var(--paper);
+  box-shadow: var(--pixel-shadow);
+}
+.touch-menu-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.touch-menu-grid button,
+.touch-menu-close {
+  min-height: 52px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+  background: #fff;
+  border: 2px solid var(--stroke);
+  border-radius: 10px;
+  box-shadow: 2px 2px 0 rgba(51, 65, 92, 0.18);
+}
+.touch-menu-close { width: 100%; margin-top: 10px; background: #eef2f6; }
+
+/* 세로 모바일에서는 그리기 화면을 캔버스 안에 가두지 않는다.
+   좁은 스테이지에 넣으면 제작·닫기 버튼이 잘려 손가락만으로는 빠져나올 수 없다. */
+body.touch-ui #draw-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 25;
+  place-items: center;
+  padding: 12px;
+  overflow-y: auto;
+}
+body.touch-ui #draw-box {
+  width: min(100%, 520px);
+  padding: 14px;
+  border: 2px solid var(--stroke);
+  border-radius: 16px;
+  background: var(--paper);
+  box-shadow: var(--pixel-shadow);
+}
+body.touch-ui .draw-title { font-size: 17px; }
+body.touch-ui .draw-legend { font-size: 12px; }
+body.touch-ui .draw-budget { font-size: 12px; color: #9a6500; }
+body.touch-ui .draw-keys {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+body.touch-ui .draw-keys button { min-height: 48px; font-size: 14px; }
+body.touch-ui .draw-keys kbd { display: none; }
+
+/* 타이틀·가방·지도·도감도 같은 이유로 화면 전체를 쓴다. 좁은 스테이지 안에서는 잘린다. */
+body.touch-ui #overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 24;
+  padding: 12px;
+  align-content: center;
+}
+body.touch-ui #overlay > div { width: min(100%, 560px); }
+body.touch-ui #overlay h1 { font-size: 22px; }
+body.touch-ui #overlay button { min-height: 46px; font-size: 14px; }
+body.touch-ui #world-map { width: min(100%, 300px); }
+
+/* 조작 안내는 지금 쓰는 입력에 맞는 것만 보여 준다. */
+.touch-keys { display: none; }
+body.touch-ui .touch-keys { display: block; }
+body.touch-ui .key-keys { display: none; }
+
+/* 손가락으로 노는 화면에서는 키 안내가 소음이다. 잠금 상태만 남긴다. */
+body.touch-ui #overlay kbd,
+body.touch-ui .draw-keys kbd { display: none; }
+body.touch-ui .ability-strip { display: none; }

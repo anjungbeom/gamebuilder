@@ -1,4 +1,4 @@
-import { PROGRESSION_TIERS, tierForFragments } from "./progression.js";
+import { PROGRESSION_TIERS, tierForFragments } from "./progression.js?rev=9";
 
 const CAPTURE_REWARDS = [2, 5, 9, 14];
 

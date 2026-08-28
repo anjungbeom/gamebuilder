@@ -1,34 +1,36 @@
 // Drawn Frontier — 그린 것이 곧 도구가 된다.
 // 상태 기계, 입력, 시뮬레이션, 저장. 순수 로직은 이웃 모듈이 맡는다.
 
-import { clamp, mulberry32, hashUnit } from "./rng.js";
-import { analyzeStrokes, nameTool, resample } from "./geometry.js";
+import { clamp, mulberry32, hashUnit } from "./rng.js?rev=9";
+import { analyzeStrokes, nameTool, resample } from "./geometry.js?rev=9";
 import {
   TILE, BIOME, biomeAt, obstacleAt, isWater, isBiomeSolid,
   OBSTACLE_RULE, WATER_RULE, landmarkPositions, LANDMARK_COUNT,
   creatureSeedAt, CREATURE_CELL, bossPositions, frontierRegionAt, regionRequiredMarksAt,
-  REGION_THEMES, villagePositions
-} from "./world.js";
-import { buildGenome, catchThreshold } from "./creature.js";
+  REGION_THEMES, villagePositions, isInsideWorld, isLockedTile,
+  EXPLORE_MIN, EXPLORE_SPAN, exploreCellOf, exploreCellIndex, exploreCellCenter,
+  exploreIndexAt, explorationPlan
+} from "./world.js?rev=9";
+import { buildGenome, catchThreshold } from "./creature.js?rev=9";
 import {
   WEAKNESS_LABELS, creatureMaxHp, bossWeakness, attackDamage, captureThresholdAtHp,
   inAttackArc, parryDisarmDuration, directionalWeaknessAllows,
   creatureAttackProfile, parryTiming, dodgeTiming, lockSafeDodgeDirection
-} from "./combat.js";
+} from "./combat.js?rev=9";
 import {
   PROGRESSION_TIERS, tierForFragments, progressionEffects, craftingCost,
   rollInteractionReward, nextTierProgress
-} from "./progression.js";
-import { environmentAt, thermalState, noiseLabel } from "./environment.js";
-import { creatureRewardProfile, scoreCreatureActions, scoreVillagerActions, scorePetActions, selectRewardAction } from "./behavior.js";
-import { ROTATING_TIPS, challengeRows, challengeState, nextChallenge } from "./challenges.js";
-import { handToolProfile, petToolStats, drawingLengthState, milestoneLengthBudget, toolThrowProfile } from "./equipment.js?rev=8";
-import { KEY_ACTIONS, DEFAULT_KEYMAP, normalizePreferences, rebindKey, actionForCode, keyLabel } from "./settings.js?rev=8";
+} from "./progression.js?rev=9";
+import { environmentAt, thermalState, noiseLabel } from "./environment.js?rev=9";
+import { creatureRewardProfile, scoreCreatureActions, scoreVillagerActions, scorePetActions, selectRewardAction } from "./behavior.js?rev=9";
+import { ROTATING_TIPS, challengeRows, challengeState, nextChallenge } from "./challenges.js?rev=9";
+import { handToolProfile, petToolStats, drawingLengthState, milestoneLengthBudget, toolThrowProfile } from "./equipment.js?rev=9";
+import { KEY_ACTIONS, DEFAULT_KEYMAP, normalizePreferences, rebindKey, actionForCode, keyLabel } from "./settings.js?rev=9";
 import {
   drawTerrain, drawLandmark, drawCreature, drawPlayer, drawHeldTool, drawCraftingReveal, drawVignette,
   drawDeathDrops, drawParryEffect, drawAtmosphere, drawRevealEffect,
   drawVillage, drawVillager, drawSmokeEffects, drawSuccessEffects
-} from "./render.js";
+} from "./render.js?rev=9";
 
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d", { alpha: false });
@@ -52,7 +54,7 @@ const el = {
   progress: document.getElementById("progress"),
   marks: document.getElementById("p-marks"),
   catalog: document.getElementById("p-catalog"),
-  depth: document.getElementById("p-depth"),
+  explored: document.getElementById("p-explored"),
   hint: document.getElementById("hint"),
   toast: document.getElementById("toast"),
   drawLayer: document.getElementById("draw-layer"),
@@ -66,6 +68,7 @@ const el = {
   mapPanel: document.getElementById("map-panel"),
   minimap: document.getElementById("minimap"),
   mapCoord: document.getElementById("map-coord"),
+  mapExplored: document.getElementById("map-explored"),
   goalText: document.getElementById("goal-text"),
   shoeName: document.getElementById("shoe-name"),
   captures: document.getElementById("p-captures"),
@@ -164,9 +167,19 @@ let settingsReturn = "palette";
 let craftingTimer = 0;
 let craftingItem = null;
 
+/** OS의 '동작 줄이기' 설정. 테스트 하니스에는 matchMedia가 없어 옵셔널 체이닝이 필요하다. */
+function prefersReducedMotion() {
+  try { return window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true; }
+  catch { return false; }
+}
+
 function loadPreferences() {
-  try { return normalizePreferences(JSON.parse(localStorage.getItem(PREF_KEY) ?? "{}")); }
-  catch { return normalizePreferences(); }
+  let stored = null;
+  try { stored = JSON.parse(localStorage.getItem(PREF_KEY) ?? "null"); } catch { stored = null; }
+  const prefs = normalizePreferences(stored ?? {});
+  // 직접 고른 적이 없으면 OS 설정을 그대로 따른다.
+  if (!stored?.animation && prefersReducedMotion()) prefs.animation = "limited";
+  return prefs;
 }
 
 let preferences = loadPreferences();
@@ -178,6 +191,8 @@ function savePreferences() {
 }
 
 const keys = new Set();
+let frameCount = 0;
+let lastHeartsKey = null;
 
 function newGame(seed) {
   return {
@@ -237,6 +252,9 @@ function newGame(seed) {
     found: new Set(),
     bossStates: new Map(),
     depth: 0,
+    explored: new Uint8Array(EXPLORE_SPAN * EXPLORE_SPAN),
+    exploredCount: 0,
+    exploreTotal: explorationPlan(seed).total,
     time: 0,
     travelDistance: 0,
     temperature: 18,
@@ -251,12 +269,50 @@ function newGame(seed) {
 
 // ---------------------------------------------------------------- 저장
 
+const EXPLORED_BYTES = Math.ceil(EXPLORE_SPAN * EXPLORE_SPAN / 8);
+
+/** 개척 격자는 셀당 1비트로 눌러 담는다. 1500칸이 200자 남짓이 된다. */
+function encodeExplored(explored) {
+  const bytes = new Uint8Array(EXPLORED_BYTES);
+  for (let i = 0; i < explored.length; i++) {
+    if (explored[i]) bytes[i >> 3] |= 1 << (i & 7);
+  }
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  try {
+    return btoa(binary);
+  } catch {
+    // base64를 못 쓰는 환경에서는 켜진 셀 번호를 그대로 남긴다.
+    return [...explored.keys()].filter(index => explored[index]);
+  }
+}
+
+function decodeExplored(data) {
+  const explored = new Uint8Array(EXPLORE_SPAN * EXPLORE_SPAN);
+  if (Array.isArray(data)) {
+    for (const index of data) {
+      if (Number.isInteger(index) && index >= 0 && index < explored.length) explored[index] = 1;
+    }
+    return explored;
+  }
+  if (typeof data === "string" && data) {
+    try {
+      const binary = atob(data);
+      for (let i = 0; i < explored.length; i++) {
+        if (binary.charCodeAt(i >> 3) & (1 << (i & 7))) explored[i] = 1;
+      }
+    } catch { /* 손상된 개척 기록은 0%에서 다시 시작한다 */ }
+  }
+  return explored;
+}
+
 function save() {
   if (!game) return;
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify({
-      v: 2,
+      v: 3,
       seed: game.seed,
+      explored: encodeExplored(game.explored),
       px: game.px, py: game.py,
       faceX: game.faceX, faceY: game.faceY,
       hp: game.hp, maxHp: game.maxHp,
@@ -375,9 +431,22 @@ function loadSave() {
     const raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return null;
     const d = JSON.parse(raw);
-    if (!d || d.v !== 2 || !Number.isFinite(d.seed)) return null;
+    // v2는 개척률이 없던 판이다. 진행은 살리고 개척 기록만 0%에서 다시 쌓는다.
+    if (!d || (d.v !== 2 && d.v !== 3) || !Number.isFinite(d.seed)) return null;
 
     const g = newGame(d.seed);
+    if (d.explored !== undefined) {
+      const plan = explorationPlan(g.seed);
+      const explored = decodeExplored(d.explored);
+      let count = 0;
+      for (let index = 0; index < explored.length; index++) {
+        // 격자 밖이나 개척 대상이 아닌 칸이 켜져 있으면 버린다.
+        if (explored[index] && plan.cells[index]) count++;
+        else explored[index] = 0;
+      }
+      g.explored = explored;
+      g.exploredCount = count;
+    }
     g.px = d.px ?? 0;
     g.py = d.py ?? 0;
     g.faceX = d.faceX ?? 1;
@@ -478,6 +547,86 @@ function isAfloat() {
   const tx = Math.floor(game.px / TILE);
   const ty = Math.floor(game.py / TILE);
   return isWater(biomeAt(tx, ty, game.seed));
+}
+
+/** 지형보다 먼저 걸리는 두 가지 벽: 아직 잠긴 지역과 원정의 경계. */
+function tileBlockReason(wx, wy, foundCount = game.found.size) {
+  const tx = Math.floor(wx / TILE);
+  const ty = Math.floor(wy / TILE);
+  if (!isInsideWorld(tx, ty)) return "edge";
+  if (isLockedTile(tx, ty, foundCount)) return "frontier";
+  return null;
+}
+
+// ---------------------------------------------------------------- 개척률
+// 밟은 칸이 아니라 다가가서 밝힌 칸을 센다. 걸음마다 화면보다 넓게 열린다.
+
+const REVEAL_CELLS = 3;
+
+function revealAround(g = game) {
+  const plan = explorationPlan(g.seed);
+  const { cx, cy } = exploreCellOf(Math.floor(g.px / TILE), Math.floor(g.py / TILE));
+  let gained = 0;
+
+  for (let dy = -REVEAL_CELLS; dy <= REVEAL_CELLS; dy++) {
+    for (let dx = -REVEAL_CELLS; dx <= REVEAL_CELLS; dx++) {
+      if (dx * dx + dy * dy > REVEAL_CELLS * REVEAL_CELLS) continue;
+      const index = exploreCellIndex(cx + dx, cy + dy);
+      if (index < 0 || !plan.cells[index] || g.explored[index]) continue;
+      // 잠긴 지역은 신호기를 켜기 전까지 개척으로 세지 않는다.
+      const center = exploreCellCenter(cx + dx, cy + dy);
+      if (isLockedTile(center.tx, center.ty, g.found.size)) continue;
+      g.explored[index] = 1;
+      gained++;
+    }
+  }
+
+  if (gained > 0) {
+    g.exploredCount += gained;
+    dirty = true;
+  }
+  return gained;
+}
+
+function explorationRatio(g = game) {
+  if (!g?.exploreTotal) return 0;
+  return clamp(g.exploredCount / g.exploreTotal, 0, 1);
+}
+
+function exploredPercentText(g = game) {
+  const ratio = explorationRatio(g);
+  // 남은 칸이 있는데 반올림 때문에 100%로 보이는 일은 없어야 한다.
+  if (ratio >= 1) return "100";
+  return Math.min(99, Math.floor(ratio * 100)).toString();
+}
+
+/** 아직 열지 않은 가장 가까운 개척 대상 셀. 잠긴 지역은 제외한다. */
+function nearestUnexplored(g = game) {
+  const plan = explorationPlan(g.seed);
+  const tx = Math.floor(g.px / TILE);
+  const ty = Math.floor(g.py / TILE);
+  let best = null;
+  let bestDistance = Infinity;
+
+  for (let index = 0; index < plan.cells.length; index++) {
+    if (!plan.cells[index] || g.explored[index]) continue;
+    const cx = (index % EXPLORE_SPAN) + EXPLORE_MIN;
+    const cy = Math.floor(index / EXPLORE_SPAN) + EXPLORE_MIN;
+    const center = exploreCellCenter(cx, cy);
+    if (isLockedTile(center.tx, center.ty, g.found.size)) continue;
+    const distance = Math.hypot(center.tx - tx, center.ty - ty);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = { cx, cy, ...center, distance };
+    }
+  }
+  return best;
+}
+
+/** 개척 완료: 신호기 다섯 개를 켜고 경계 안을 모두 밝힌 상태. */
+function frontierCleared(g = game) {
+  if (!g.exploreTotal) return false;
+  return g.found.size >= LANDMARK_COUNT && g.exploredCount >= g.exploreTotal;
 }
 
 function refreshVillagers() {
@@ -1950,9 +2099,15 @@ function checkLandmarks() {
       rewardNotice("체력·장착 장비 완전 회복");
       toast(`${m.name} 활성화 · 체력과 장착 장비 완전 회복`, "good");
       saveNow();
-      if (game.found.size >= LANDMARK_COUNT) showWin();
+      checkFrontierComplete();
     }
   }
+}
+
+/** 신호기와 개척률이 모두 찼을 때만 원정이 끝난다. */
+function checkFrontierComplete() {
+  if (mode !== "play" || !frontierCleared()) return;
+  showWin();
 }
 
 // ---------------------------------------------------------------- 수집품
@@ -2035,12 +2190,25 @@ function drawDroppedItems(camX, camY) {
 // ---------------------------------------------------------------- 그리기 모드
 
 let strokes = [];
+let strokeRevision = 0;
+let draftStatsCache = null;
+let draftStatsRevision = -1;
+
+/** 그리는 동안 같은 획을 프레임마다 세 번씩 분석하던 것을 한 번으로 줄인다. */
+function draftStats() {
+  if (draftStatsRevision !== strokeRevision) {
+    draftStatsCache = analyzeStrokes(strokes, PAD_W, PAD_H);
+    draftStatsRevision = strokeRevision;
+  }
+  return draftStatsCache;
+}
 let current = null;
 let drawing = false;
 
 function openDraw(slot = "hand") {
   draftSlot = slot;
   strokes = [];
+  strokeRevision++;
   current = null;
   drawing = false;
   deleteMode = false;
@@ -2107,6 +2275,7 @@ function removeStrokeAt(point) {
   const index = strokeAt(point);
   if (index < 0) return false;
   strokes.splice(index, 1);
+  strokeRevision++;
   hoverStroke = -1;
   renderPad();
   updateHud();
@@ -2129,7 +2298,7 @@ function confirmDraw() {
     toast(`장비 가방이 가득 찼다 · Tab에서 장비를 정리하자`, "bad");
     return;
   }
-  const length = drawingLengthState(analyzeStrokes(strokes, PAD_W, PAD_H), game.milestone);
+  const length = drawingLengthState(draftStats(), game.milestone);
   if (length.exceeded) {
     toast("설계 길이 한도를 넘었다 · 획을 줄여 보자", "bad");
     return;
@@ -2177,10 +2346,11 @@ pad.addEventListener("pointerdown", e => {
     removeStrokeAt(padPoint(e));
     return;
   }
-  pad.setPointerCapture?.(e.pointerId);
+  try { pad.setPointerCapture?.(e.pointerId); } catch { /* 캡처가 안 돼도 그리기는 이어진다 */ }
   drawing = true;
   current = [padPoint(e)];
   strokes.push(current);
+  strokeRevision++;
   renderPad();
   updateHud();
 });
@@ -2201,7 +2371,7 @@ pad.addEventListener("pointermove", e => {
   const tail = current[current.length - 1];
   const segment = Math.hypot(p.x - tail.x, p.y - tail.y);
   if (segment < 1.5) return;
-  const length = drawingLengthState(analyzeStrokes(strokes, PAD_W, PAD_H), game.milestone);
+  const length = drawingLengthState(draftStats(), game.milestone);
   if (length.remaining <= 1) {
     drawing = false;
     toast(`${length.label} 설계 길이 여유를 모두 사용했다`);
@@ -2210,9 +2380,13 @@ pad.addEventListener("pointermove", e => {
   if (segment > length.remaining) {
     const ratio = length.remaining / segment;
     current.push({ x: tail.x + (p.x - tail.x) * ratio, y: tail.y + (p.y - tail.y) * ratio });
+    strokeRevision++;
     drawing = false;
     toast(`${length.label} 설계 길이 여유를 모두 사용했다`);
-  } else current.push(p);
+  } else {
+    current.push(p);
+    strokeRevision++;
+  }
   renderPad();
   updateHud();
 });
@@ -2284,6 +2458,7 @@ document.querySelectorAll(".draw-keys button").forEach(btn => {
       updateHud();
     } else if (act === "clear") {
       strokes = [];
+      strokeRevision++;
       current = null;
       hoverStroke = -1;
       renderPad();
@@ -2309,7 +2484,7 @@ const barRows = Array.from({ length: 4 }, () => {
 
 function statsForHud() {
   if (mode === "draw") {
-    const base = analyzeStrokes(strokes, PAD_W, PAD_H);
+    const base = draftStats();
     if (draftSlot === "shoes") return shoeStatsFrom(base);
     if (draftSlot === "pet") return petToolStats(base);
     return handToolProfile(base).stats;
@@ -2336,7 +2511,7 @@ function updateHud() {
   }
 
   if (mode === "draw") {
-    const base = analyzeStrokes(strokes, PAD_W, PAD_H);
+    const base = draftStats();
     const length = drawingLengthState(base, game.milestone);
     const d = draftSlot === "shoes"
       ? Math.round(5 + shoeStatsFrom(base).endurance * 18) + game.found.size
@@ -2372,14 +2547,19 @@ function updateHud() {
 
   el.marks.textContent = game.found.size;
   el.catalog.textContent = game.dex.size;
-  el.depth.textContent = game.depth;
+  el.explored.textContent = `${exploredPercentText()}%`;
   el.captures.textContent = game.captures;
   el.ink.textContent = game.ink;
   el.shoeName.textContent = game.shoes ? game.shoes.name : "기본 장화";
-  el.hearts.innerHTML = Array.from({ length: game.maxHp }, (_, i) =>
-    `<i class="heart ${i < game.hp ? "full" : "empty"}" aria-hidden="true">♥</i>`
-  ).join("");
-  el.hearts.setAttribute?.("aria-label", `체력 ${game.hp}/${game.maxHp}`);
+  // 하트는 체력이 변할 때만 다시 그린다.
+  const heartsKey = `${game.hp}/${game.maxHp}`;
+  if (heartsKey !== lastHeartsKey) {
+    lastHeartsKey = heartsKey;
+    el.hearts.innerHTML = Array.from({ length: game.maxHp }, (_, i) =>
+      `<i class="heart ${i < game.hp ? "full" : "empty"}" aria-hidden="true">♥</i>`
+    ).join("");
+    el.hearts.setAttribute?.("aria-label", `체력 ${heartsKey}`);
+  }
   const frontier = nextTierProgress(game.fragments);
   el.resonance.textContent = FRONTIER_LABELS[frontier.tier] ?? "개척자";
   el.fragments.textContent = frontier.next ? "다음 기술 준비 중" : "모든 기술 완성";
@@ -2405,6 +2585,7 @@ function compassDirection(dx, dy) {
 }
 
 function updateMap() {
+  const plan = explorationPlan(game.seed);
   const tx = Math.floor(game.px / TILE);
   const ty = Math.floor(game.py / TILE);
   const cols = 22;
@@ -2415,9 +2596,20 @@ function updateMap() {
     for (let x = 0; x < cols; x++) {
       const wx = tx + x - Math.floor(cols / 2);
       const wy = ty + y - Math.floor(rows / 2);
-      const locked = regionRequiredMarksAt(wx, wy) > game.found.size;
+      if (!isInsideWorld(wx, wy)) {
+        mapCtx.fillStyle = "#111823";
+        mapCtx.fillRect(x * cell, y * cell, cell, cell);
+        continue;
+      }
+      const locked = isLockedTile(wx, wy, game.found.size);
       mapCtx.fillStyle = MAP_COLORS[biomeAt(wx, wy, game.seed)] ?? "#9dbf62";
       mapCtx.fillRect(x * cell, y * cell, cell, cell);
+      const cellIndex = exploreIndexAt(wx, wy);
+      if (!locked && plan.cells[cellIndex] && !game.explored[cellIndex]) {
+        // 아직 밝히지 않은 칸은 살짝 눌러 둔다.
+        mapCtx.fillStyle = "rgba(16,24,34,.34)";
+        mapCtx.fillRect(x * cell, y * cell, cell, cell);
+      }
       if (locked) {
         mapCtx.fillStyle = `rgba(20,31,43,${((x + y + Math.floor(game.time / 420)) % 3 === 0 ? .62 : .48)})`;
         mapCtx.fillRect(x * cell, y * cell, cell, cell);
@@ -2440,7 +2632,12 @@ function updateMap() {
     mapCtx.fillRect(mx * cell + 1, my * cell + 1, 2, 2);
     el.goalText.textContent = `${compassDirection(rx, ry)}쪽 · ${target.name}`;
   } else {
-    el.goalText.textContent = "모든 신호기 활성화 완료 · 자유 탐사 중";
+    // 신호기를 다 켠 뒤에는 남은 미개척지가 다음 목표가 된다.
+    const remaining = Math.max(0, game.exploreTotal - game.exploredCount);
+    const spot = remaining > 0 ? nearestUnexplored() : null;
+    el.goalText.textContent = spot
+      ? `${compassDirection(spot.tx - tx, spot.ty - ty)}쪽 · 미개척 ${remaining}칸`
+      : remaining > 0 ? `미개척 ${remaining}칸 남음` : "이 원정의 모든 땅을 개척했다";
   }
 
   mapCtx.fillStyle = "#fff";
@@ -2448,10 +2645,27 @@ function updateMap() {
   mapCtx.strokeStyle = "#172033";
   mapCtx.strokeRect(Math.floor(cols / 2) * cell, Math.floor(rows / 2) * cell, cell, cell);
   el.mapCoord.textContent = frontierRegionAt(tx, ty).name;
+  // 개척률은 나침반 옆이 제자리다. 진행 패널의 숫자는 HUD 등급에서 숨겨진다.
+  el.mapExplored.textContent = `개척 ${exploredPercentText()}%`;
+}
+
+// 힌트는 매 프레임 도는데 내용은 거의 그대로다. 달라질 때만 DOM을 건드린다.
+let hintHtml = null;
+
+function setHint(html) {
+  if (hintHtml !== html) {
+    hintHtml = html;
+    el.hint.innerHTML = html;
+  }
+  el.hint.hidden = false;
+}
+
+function hideHint() {
+  el.hint.hidden = true;
 }
 
 function updateHint() {
-  if (mode !== "play") { el.hint.hidden = true; return; }
+  if (mode !== "play") { hideHint(); return; }
 
   const nearbyCreature = nearestCreature();
   if (nearbyCreature?.hostile) {
@@ -2464,8 +2678,7 @@ function updateHint() {
       : activePart ? ` · 파괴 대상 <b>${activePart.label}</b>` : "";
     const capturable = c.rank === "normal" && c.hp / c.maxHp <= 0.38 ? ` · <b>${binding("capture")}</b> 포획 가능` : "";
     const disarmed = c.disarmed > 0 ? " · <b>무장해제 중</b>" : "";
-    el.hint.innerHTML = `${rank} ${c.genome.name}${weakness}${disarmed} — <b>${binding("attack")}</b> 공격 · <b>${binding("throw")}</b> 투척 · <b>${binding("parry")}</b> 패링${capturable}`;
-    el.hint.hidden = false;
+    setHint(`${rank} ${c.genome.name}${weakness}${disarmed} — <b>${binding("attack")}</b> 공격 · <b>${binding("throw")}</b> 투척 · <b>${binding("parry")}</b> 패링${capturable}`);
     return;
   }
 
@@ -2474,10 +2687,9 @@ function updateHint() {
     const rule = OBSTACLE_RULE[ob.kind];
     const have = game.tool ? game.tool.stats[rule.stat] : 0;
     const ok = have >= rule.threshold;
-    el.hint.innerHTML = ok
+    setHint(ok
       ? `${rule.label} — <b>${binding("attack")}</b>로 길 열기`
-      : `${rule.label} — ${rule.need} <b>도구 성능이 더 필요하다</b>`;
-    el.hint.hidden = false;
+      : `${rule.label} — ${rule.need} <b>도구 성능이 더 필요하다</b>`);
     return;
   }
 
@@ -2485,25 +2697,22 @@ function updateHint() {
   if (c) {
     const need = catchThreshold(c.genome);
     const have = game.tool ? game.tool.stats.grip : 0;
-    el.hint.innerHTML = have >= need
+    setHint(have >= need
       ? `◇ 온순한 크리처 ${c.genome.name} · <b>${binding("capture")}</b>로 길들이기`
-      : `◇ 온순한 크리처 ${c.genome.name} · <b>포획력이 더 필요하다</b>`;
-    el.hint.hidden = false;
+      : `◇ 온순한 크리처 ${c.genome.name} · <b>포획력이 더 필요하다</b>`);
     return;
   }
 
   if (!canFloat() && nearWater()) {
-    el.hint.innerHTML = "깊은 물 · 부력형 손도구가 필요하다";
-    el.hint.hidden = false;
+    setHint("깊은 물 · 부력형 손도구가 필요하다");
     return;
   }
   const thermal = thermalState(game.temperature);
   if (thermal.key !== "comfortable") {
-    el.hint.innerHTML = `${thermal.name} 상태 · 이동 속도 감소${game.running ? " · 달리기로 체온 조절 중" : ""}`;
-    el.hint.hidden = false;
+    setHint(`${thermal.name} 상태 · 이동 속도 감소${game.running ? " · 달리기로 체온 조절 중" : ""}`);
     return;
   }
-  el.hint.hidden = true;
+  hideHint();
 }
 
 function nearWater() {
@@ -2524,9 +2733,16 @@ function toast(text, kind = "") {
   toastTimer = 2.2;
 }
 
+// 한 프레임 안에서 환경은 바뀌지 않는다. 프레임마다 한 번만 계산해 돌려 쓴다.
+let envCache = null;
+let envCacheFrame = -1;
+
 function currentEnvironment() {
+  if (envCacheFrame === frameCount && envCache) return envCache;
   const biome = biomeAt(Math.floor(game.px / TILE), Math.floor(game.py / TILE), game.seed);
-  return environmentAt(game.seed, game.travelDistance, biome);
+  envCache = environmentAt(game.seed, game.travelDistance, biome);
+  envCacheFrame = frameCount;
+  return envCache;
 }
 
 function gradeInGameUi(env) {
@@ -2669,7 +2885,11 @@ function showTitle() {
         ${hasSave ? `<button class="ghost" data-act="continue">원정 계속</button>` : ""}
         <button class="ghost" data-act="settings">환경설정</button>
       </div>
-      <p class="keys">
+      <p class="keys touch-keys">
+        <b>스틱</b> 이동 · <b>끝까지 밀면</b> 달리기 · <b>사용</b> 공격·장애물 제거 · <b>패링 · 회피</b> 방어 · <b>와이어 · 락온</b> 해금 기술<br>
+        그 밖의 도구 설계 · 포획 · 가방 · 지도는 <b>메뉴</b> 버튼에 모여 있습니다
+      </p>
+      <p class="keys key-keys">
         <b>${binding("up")}${binding("left")}${binding("down")}${binding("right")}</b> 이동 · <b>${binding("sprint")}</b> 달리기 · <b>${binding("dodge")}</b> 회피 · <b>${binding("inventory")}</b> 장비 가방 · <b>${binding("attack")}</b> 방향 공격·사용 · <b>${binding("throw")}</b> 도구 투척 · <b>${binding("parry")}</b> 짧은 패링 · <b>${binding("capture")}</b> 포획·길들이기<br>
         해금 기술: <b>${binding("jump")}</b> 점프 · <b>${binding("wire")}</b> 와이어 · <b>${binding("reflector")}</b> 반사 방벽 · <b>${binding("lockOn")}</b> 조준 방향 고정<br>
         회피: <b>${binding("dodge")}</b> 최근 이동 모멘텀으로 짧게 대시 · 락온 중 대상에게 가까워지는 방향은 차단 · 신발에 따라 거리 변화<br>
@@ -2681,16 +2901,18 @@ function showTitle() {
 
 function showWin() {
   mode = "win";
-  save();
+  saveNow();
   el.overlay.hidden = false;
   el.overlay.innerHTML = `
     <div>
-      <h1>모든 신호기를 활성화했다</h1>
-      <p class="sub">모든 신호기와 크리처 기록을 완성했습니다</p>
-      <p class="mission">다섯 지역이 모두 지도에 연결되었습니다.<br>이후에도 세계를 계속 탐사하고 새로운 크리처와 장비를 발견할 수 있습니다.</p>
+      <h1>이 땅을 모두 개척했다</h1>
+      <p class="sub">신호기 ${game.found.size}/${LANDMARK_COUNT} · 개척률 ${exploredPercentText()}%</p>
+      <p class="mission">경계 안 ${game.exploreTotal}칸을 전부 밝혔습니다.<br>
+        발견한 종 ${game.dex.size} · 적대 포획 ${game.captures} · 이동 ${Math.round(game.travelDistance)}칸<br>
+        다른 시드에서는 완전히 다른 크기의 땅과 생태가 기다립니다.</p>
       <div class="row">
         <button data-act="new">다른 시드로 출발</button>
-        <button class="ghost" data-act="keep">계속 탐사하기</button>
+        <button class="ghost" data-act="keep">이 세계에 남기</button>
       </div>
     </div>`;
 }
@@ -2717,68 +2939,82 @@ function showWorldMap() {
   const playerTx = Math.floor(game.px / TILE);
   const playerTy = Math.floor(game.py / TILE);
   const currentRegion = frontierRegionAt(playerTx, playerTy);
+  const remaining = Math.max(0, game.exploreTotal - game.exploredCount);
+  const size = EXPLORE_SPAN * 6;
   el.overlay.hidden = false;
   el.overlay.innerHTML = `
     <div class="world-map-wrap">
-      <h1>세계 지도</h1>
-      <p class="sub">${currentRegion.name} · 신호기와 지형을 확인하세요</p>
-      <canvas id="world-map" width="256" height="176" aria-label="세계 지도"></canvas>
+      <h1>개척 지도</h1>
+      <p class="sub">${currentRegion.name} · 개척률 ${exploredPercentText()}% · 남은 땅 ${remaining}칸</p>
+      <canvas id="world-map" width="${size}" height="${size}" aria-label="원정 전체 지도"></canvas>
       <div class="row"><button class="ghost" data-act="keep">지도 닫기 <kbd>${binding("map")}</kbd></button></div>
     </div>`;
 
+  // 경계가 생긴 뒤로는 세계 전체가 한 화면에 들어온다. 셀 하나가 8x8 타일이다.
   const worldMap = document.getElementById("world-map");
   const worldCtx = worldMap.getContext("2d");
   worldCtx.imageSmoothingEnabled = false;
-  const cell = 4;
-  const cols = worldMap.width / cell;
-  const rows = worldMap.height / cell;
-  const tx = playerTx;
-  const ty = playerTy;
-  const left = tx - Math.floor(cols / 2);
-  const top = ty - Math.floor(rows / 2);
-  for (let y = 0; y < rows; y++) {
-    for (let x = 0; x < cols; x++) {
-      const wx = left + x;
-      const wy = top + y;
-      const locked = regionRequiredMarksAt(wx, wy) > game.found.size;
-      worldCtx.fillStyle = MAP_COLORS[biomeAt(wx, wy, game.seed)] ?? "#9dbf62";
-      worldCtx.fillRect(x * cell, y * cell, cell, cell);
-      if (locked) {
-        worldCtx.fillStyle = (x + y + Math.floor(game.time / 500)) % 3 === 0 ? "rgba(20,32,44,.65)" : "rgba(13,23,33,.48)";
-        worldCtx.fillRect(x * cell, y * cell, cell, cell);
+  const plan = explorationPlan(game.seed);
+  const cell = 6;
+  const originX = -EXPLORE_MIN;
+  const originY = -EXPLORE_MIN;
+
+  worldCtx.fillStyle = "#0d1420";
+  worldCtx.fillRect(0, 0, size, size);
+
+  for (let cy = EXPLORE_MIN; cy < EXPLORE_MIN + EXPLORE_SPAN; cy++) {
+    for (let cx = EXPLORE_MIN; cx < EXPLORE_MIN + EXPLORE_SPAN; cx++) {
+      const center = exploreCellCenter(cx, cy);
+      if (!isInsideWorld(center.tx, center.ty)) continue;
+      const index = exploreCellIndex(cx, cy);
+      const x = (cx + originX) * cell;
+      const y = (cy + originY) * cell;
+
+      worldCtx.fillStyle = MAP_COLORS[biomeAt(center.tx, center.ty, game.seed)] ?? "#9dbf62";
+      worldCtx.fillRect(x, y, cell, cell);
+
+      if (isLockedTile(center.tx, center.ty, game.found.size)) {
+        worldCtx.fillStyle = (cx + cy) % 2 === 0 ? "rgba(20,32,44,.72)" : "rgba(13,23,33,.6)";
+        worldCtx.fillRect(x, y, cell, cell);
+      } else if (plan.cells[index] && !game.explored[index]) {
+        worldCtx.fillStyle = "rgba(11,18,28,.52)";
+        worldCtx.fillRect(x, y, cell, cell);
       }
     }
   }
+
+  const plotTile = (tx, ty) => {
+    const { cx, cy } = exploreCellOf(tx, ty);
+    return { x: (cx + originX) * cell, y: (cy + originY) * cell };
+  };
+
   for (const mark of game.marks) {
-    if (regionRequiredMarksAt(mark.tx, mark.ty) > game.found.size) continue;
-    const mx = mark.tx - left;
-    const my = mark.ty - top;
-    if (mx < 0 || my < 0 || mx >= cols || my >= rows) continue;
+    if (isLockedTile(mark.tx, mark.ty, game.found.size)) continue;
+    const { x, y } = plotTile(mark.tx, mark.ty);
     worldCtx.fillStyle = game.found.has(mark.index) ? "#7ee0c0" : "#ffd166";
-    worldCtx.fillRect(mx * cell - 1, my * cell - 1, cell + 2, cell + 2);
+    worldCtx.fillRect(x - 1, y - 1, cell + 2, cell + 2);
   }
   for (const boss of game.bosses) {
     if (game.handled.has(`boss:${boss.index}`)) continue;
-    if (regionRequiredMarksAt(boss.tx, boss.ty) > game.found.size) continue;
-    const bx = boss.tx - left;
-    const by = boss.ty - top;
-    if (bx < 0 || by < 0 || bx >= cols || by >= rows) continue;
+    if (isLockedTile(boss.tx, boss.ty, game.found.size)) continue;
+    const { x, y } = plotTile(boss.tx, boss.ty);
     worldCtx.fillStyle = boss.rank === "fieldboss" ? "#ff4f68" : "#d98cff";
-    worldCtx.fillRect(bx * cell - 2, by * cell - 2, cell + 4, cell + 4);
+    worldCtx.fillRect(x - 1, y - 1, cell + 2, cell + 2);
   }
   for (const village of game.villages) {
     if (village.requiredMarks > game.found.size) continue;
-    const vx = village.tx - left, vy = village.ty - top;
-    if (vx < 0 || vy < 0 || vx >= cols || vy >= rows) continue;
+    const { x, y } = plotTile(village.tx, village.ty);
     worldCtx.fillStyle = "#fff0a8";
-    worldCtx.fillRect(vx * cell - 1, vy * cell - 1, cell + 2, cell + 2);
+    worldCtx.fillRect(x, y, cell, cell);
     worldCtx.fillStyle = "#7ee0c0";
-    worldCtx.fillRect(vx * cell, vy * cell, 2, 2);
+    worldCtx.fillRect(x + 2, y + 2, 2, 2);
   }
+
+  const here = plotTile(playerTx, playerTy);
   worldCtx.fillStyle = "#fff";
-  worldCtx.fillRect(Math.floor(cols / 2) * cell - 1, Math.floor(rows / 2) * cell - 1, 6, 6);
+  worldCtx.fillRect(here.x, here.y, cell, cell);
   worldCtx.strokeStyle = "#172033";
-  worldCtx.strokeRect(Math.floor(cols / 2) * cell - 2, Math.floor(rows / 2) * cell - 2, 8, 8);
+  worldCtx.strokeRect(here.x - 1, here.y - 1, cell + 2, cell + 2);
 }
 
 function gearStatText(item) {
@@ -3101,9 +3337,20 @@ function actionHeld(action) {
   return [...keys].some(code => actionForCode(preferences.keymap, code) === action);
 }
 
+/**
+ * 기본 동작을 언제 막을지. 플레이 중에는 스페이스 스크롤 같은 것을 막아야 하지만,
+ * 오버레이가 열려 있을 때 Tab·Enter·Space까지 삼키면 키보드로 버튼을 누를 수 없다.
+ */
+function shouldPreventKey(code, action) {
+  if (mode === "settings") return true;
+  if (mode === "play") return Boolean(action) || ["Escape", "Enter", "Backspace"].includes(code);
+  if (mode === "draw") return ["Escape", "Enter", "Backspace"].includes(code);
+  return false;
+}
+
 window.addEventListener("keydown", e => {
   const action = actionForCode(preferences.keymap, e.code);
-  if (action || ["Escape", "Enter", "Backspace"].includes(e.code)) e.preventDefault();
+  if (shouldPreventKey(e.code, action)) e.preventDefault();
 
   if (mode === "settings") {
     if (rebindingAction) {
@@ -3135,6 +3382,7 @@ window.addEventListener("keydown", e => {
     else if (e.code === "Escape") closeDraw();
     else if (e.code === "Backspace") {
       strokes = [];
+      strokeRevision++;
       current = null;
       hoverStroke = -1;
       renderPad();
@@ -3174,7 +3422,12 @@ window.addEventListener("keydown", e => {
   }
 
   if (mode !== "play") return;
+  runAction(action);
+});
 
+/** 키보드와 터치 버튼이 함께 쓰는 단일 진입점. */
+function runAction(action) {
+  if (mode !== "play") return;
   if (action === "draw") openDraw("hand");
   else if (action === "attack") useTool();
   else if (action === "throw") tryThrowTool();
@@ -3189,10 +3442,156 @@ window.addEventListener("keydown", e => {
   else if (action === "wire") useWire();
   else if (action === "reflector") useReflector();
   else if (action === "lockOn") toggleLockOn();
-});
+}
 
 window.addEventListener("keyup", e => keys.delete(e.code));
 window.addEventListener("blur", () => keys.clear());
+
+// ---------------------------------------------------------------- 오버레이 포커스
+// 오버레이가 열리면 첫 버튼으로 포커스를 옮기고, 닫히면 원래 자리로 돌려준다.
+
+let overlayWasOpen = false;
+let focusReturn = null;
+
+function syncOverlayFocus() {
+  const open = !el.overlay.hidden;
+  if (open === overlayWasOpen) return;
+  overlayWasOpen = open;
+
+  if (open) {
+    focusReturn = document.activeElement ?? null;
+    el.overlay.setAttribute?.("role", "dialog");
+    el.overlay.setAttribute?.("aria-modal", "true");
+    el.overlay.querySelector?.("button")?.focus?.();
+    return;
+  }
+  el.overlay.removeAttribute?.("role");
+  el.overlay.removeAttribute?.("aria-modal");
+  focusReturn?.focus?.();
+  focusReturn = null;
+}
+
+// ---------------------------------------------------------------- 터치 조작
+// 손가락도 키보드와 같은 액션 진입점을 쓴다. 스틱은 이동 벡터를 그대로 얹는다.
+
+const touchStick = { x: 0, y: 0, sprint: false, pointerId: null };
+const touchLayer = document.getElementById("touch-controls");
+const stickPad = document.getElementById("touch-stick");
+const stickNub = document.getElementById("touch-nub");
+const hudDock = document.getElementById("hud-dock");
+const touchMenu = document.getElementById("touch-menu");
+const touchMenuButton = document.getElementById("touch-menu-open");
+let touchControlsShown = false;
+
+function showTouchControls() {
+  if (touchControlsShown || !touchLayer) return;
+  touchControlsShown = true;
+  touchLayer.hidden = false;
+  dockHudPanels();
+}
+
+/**
+ * 좁은 화면에서는 HUD 패널이 세계를 거의 다 덮는다.
+ * 같은 요소를 캔버스 아래 정보판으로 옮겨 담아 화면과 조이스틱 사이에 세로로 세운다.
+ */
+function dockHudPanels() {
+  if (!hudDock?.appendChild) return;
+  hudDock.hidden = false;
+  for (const panel of [el.toolPanel, el.vitals, el.mapPanel, el.progress]) {
+    if (panel) hudDock.appendChild(panel);
+  }
+  document.body?.classList?.add("touch-ui");
+}
+
+function setTouchMenu(open) {
+  if (!touchMenu) return;
+  touchMenu.hidden = !open;
+}
+
+function resetStick() {
+  touchStick.x = 0;
+  touchStick.y = 0;
+  touchStick.sprint = false;
+  touchStick.pointerId = null;
+  if (stickNub?.style) {
+    stickNub.style.left = "50%";
+    stickNub.style.top = "50%";
+  }
+}
+
+function updateStick(e) {
+  const rect = stickPad.getBoundingClientRect();
+  const radius = Math.max(1, Math.min(rect.width, rect.height) / 2);
+  const dx = (e.clientX - (rect.left + rect.width / 2)) / radius;
+  const dy = (e.clientY - (rect.top + rect.height / 2)) / radius;
+  const length = Math.hypot(dx, dy);
+  const scale = length > 1 ? 1 / length : 1;
+  touchStick.x = dx * scale;
+  touchStick.y = dy * scale;
+  // 스틱을 끝까지 밀면 달린다. 별도 버튼을 두지 않는다.
+  touchStick.sprint = length > 0.78;
+  if (stickNub?.style) {
+    stickNub.style.left = `${50 + touchStick.x * 32}%`;
+    stickNub.style.top = `${50 + touchStick.y * 32}%`;
+  }
+}
+
+if (stickPad) {
+  stickPad.addEventListener("pointerdown", e => {
+    showTouchControls();
+    touchStick.pointerId = e.pointerId;
+    try { stickPad.setPointerCapture?.(e.pointerId); } catch { /* 캡처 실패해도 스틱은 동작한다 */ }
+    updateStick(e);
+    e.preventDefault?.();
+  });
+  stickPad.addEventListener("pointermove", e => {
+    if (touchStick.pointerId !== e.pointerId) return;
+    updateStick(e);
+  });
+  const release = e => {
+    if (touchStick.pointerId !== e?.pointerId) return;
+    resetStick();
+  };
+  stickPad.addEventListener("pointerup", release);
+  stickPad.addEventListener("pointercancel", release);
+  stickPad.addEventListener("lostpointercapture", release);
+}
+
+// 조작판과 메뉴는 같은 진입점을 쓴다. 메뉴에서 고른 동작은 시트를 닫고 실행한다.
+for (const surface of [touchLayer, touchMenu]) {
+  surface?.addEventListener("pointerdown", e => {
+    if (e.target?.closest?.("[data-touch-close]")) {
+      e.preventDefault?.();
+      setTouchMenu(false);
+      return;
+    }
+    const button = e.target?.closest?.("[data-touch-action]");
+    if (!button) {
+      // 시트 바깥을 누르면 닫는다.
+      if (surface === touchMenu && !e.target?.closest?.(".touch-menu-sheet")) setTouchMenu(false);
+      return;
+    }
+    e.preventDefault?.();
+    if (surface === touchMenu) setTouchMenu(false);
+    runAction(button.dataset.touchAction);
+  });
+}
+
+touchMenuButton?.addEventListener("pointerdown", e => {
+  e.preventDefault?.();
+  setTouchMenu(touchMenu?.hidden !== false);
+});
+
+// 손가락 입력이 들어오면 조작판을 띄운다. 데스크톱에서는 보이지 않는다.
+window.addEventListener("pointerdown", e => {
+  if (e.pointerType === "touch") showTouchControls();
+});
+
+// 주 입력이 손가락인 기기는 첫 화면부터 모바일 배치로 연다.
+// 터치스크린 노트북까지 걸리지 않도록 pointer: coarse로 판단한다.
+try {
+  if (window.matchMedia?.("(pointer: coarse)")?.matches) showTouchControls();
+} catch { /* matchMedia가 없는 환경에서는 첫 터치를 기다린다 */ }
 
 // ---------------------------------------------------------------- 루프
 
@@ -3200,11 +3599,9 @@ function updateImpact(dt) {
   if (Math.abs(game.knockX) + Math.abs(game.knockY) < .5) return;
   const nx = game.px + game.knockX * dt;
   const ny = game.py + game.knockY * dt;
-  const lockX = regionRequiredMarksAt(Math.floor(nx / TILE), Math.floor(game.py / TILE)) > game.found.size;
-  const lockY = regionRequiredMarksAt(Math.floor(game.px / TILE), Math.floor(ny / TILE)) > game.found.size;
-  if (!lockX && !blockedAt(nx, game.py)) game.px = nx;
+  if (!tileBlockReason(nx, game.py) && !blockedAt(nx, game.py)) game.px = nx;
   else game.knockX *= -.18;
-  if (!lockY && !blockedAt(game.px, ny)) game.py = ny;
+  if (!tileBlockReason(game.px, ny) && !blockedAt(game.px, ny)) game.py = ny;
   else game.knockY *= -.18;
   game.knockX *= Math.max(0, 1 - dt * 8);
   game.knockY *= Math.max(0, 1 - dt * 8);
@@ -3218,8 +3615,8 @@ function movePlayer(dt) {
     game.running = false;
     return;
   }
-  let inputX = 0;
-  let inputY = 0;
+  let inputX = touchStick.x;
+  let inputY = touchStick.y;
   for (const code of keys) {
     const v = moveVectorForCode(code);
     if (v) { inputX += v[0]; inputY += v[1]; }
@@ -3247,7 +3644,7 @@ function movePlayer(dt) {
   }
 
   game.walking = dx !== 0 || dy !== 0;
-  game.running = game.walking && actionHeld("sprint");
+  game.running = game.walking && (actionHeld("sprint") || touchStick.sprint);
   if (!game.walking) return;
 
   const len = Math.hypot(dx, dy) || 1;
@@ -3270,15 +3667,16 @@ function movePlayer(dt) {
   const ny = game.py + (dy / len) * step;
 
   // 축을 나눠 검사하면 벽을 따라 미끄러진다.
-  const lockX = regionRequiredMarksAt(Math.floor(nx / TILE), Math.floor(game.py / TILE)) > game.found.size;
-  const lockY = regionRequiredMarksAt(Math.floor(game.px / TILE), Math.floor(ny / TILE)) > game.found.size;
-  const blockX = lockX ? "frontier" : game.jumpTimer > 0 ? null : blockedAt(nx, game.py);
-  const blockY = lockY ? "frontier" : game.jumpTimer > 0 ? null : blockedAt(game.px, ny);
+  const blockX = tileBlockReason(nx, game.py) ?? (game.jumpTimer > 0 ? null : blockedAt(nx, game.py));
+  const blockY = tileBlockReason(game.px, ny) ?? (game.jumpTimer > 0 ? null : blockedAt(game.px, ny));
   if (!blockX) game.px = nx;
   if (!blockY) game.py = ny;
   if (game.jumpTimer <= 0 && (blockX === "bramble" || blockY === "bramble")) hurtPlayer("가시덩굴");
   if ((blockX === "frontier" || blockY === "frontier") && el.toast.hidden) {
     toast("다음 지역은 아직 잠겨 있다 · 앞선 신호기를 먼저 활성화하자", "bad");
+  }
+  if ((blockX === "edge" || blockY === "edge") && el.toast.hidden) {
+    toast("여기가 이 원정의 경계다 · 안쪽을 마저 개척하자", "bad");
   }
   const moved = Math.hypot(game.px - beforeX, game.py - beforeY);
   wearShoes(moved);
@@ -3474,6 +3872,8 @@ function render() {
 
 function frame(now) {
   requestAnimationFrame(frame);
+  frameCount++;
+  syncOverlayFocus();
   const dt = Math.min((now - last) / 1000, 0.05);
   last = now;
 
@@ -3503,6 +3903,7 @@ function frame(now) {
     updatePet(dt);
     updateProjectiles(dt);
     updateDroppedItems();
+    if (revealAround() > 0) checkFrontierComplete();
     checkLandmarks();
     game.swing = Math.max(0, game.swing - dt * 5);
     game.attackFlash = Math.max(0, game.attackFlash - dt * 4);

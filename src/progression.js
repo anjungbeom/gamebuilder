@@ -1,6 +1,6 @@
 // 확률 보상과 탐사 등급은 순수 로직으로 분리해 같은 시드에서 재현 가능하게 한다.
 
-import { hashUnit } from "./rng.js";
+import { hashUnit } from "./rng.js?rev=9";
 
 export const PROGRESSION_TIERS = [
   { fragments: 2, name: "채집 요령", description: "기술 조각 발견 확률 +10%" },

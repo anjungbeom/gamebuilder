@@ -4,10 +4,11 @@ import { analyzeStrokes, isClosed, polygonArea, resample, span } from "../src/ge
 import {
   biomeAt, obstacleAt, landmarkPositions, LANDMARK_COUNT, isWater, isBiomeSolid,
   creatureSeedAt, frontierRegionAt, regionRequiredMarksAt, bossPositions,
-  villagePositions
+  villagePositions, WORLD_RADIUS, isInsideWorld, isLockedTile, explorationPlan,
+  exploreCellIndex, exploreCellOf, exploreIndexAt, exploreCellCenter, EXPLORE_CELL, EXPLORE_SPAN
 } from "../src/world.js";
 import { buildGenome, bodyPlan } from "../src/creature.js";
-import { drawCreature, drawPlayer, drawCraftingReveal } from "../src/render.js";
+import { drawCreature, drawPlayer, drawCraftingReveal, drawTerrain } from "../src/render.js";
 import {
   creatureMaxHp, bossWeakness, attackDamage, captureThresholdAtHp,
   inAttackArc, parryDisarmDuration, directionalWeaknessAllows,
@@ -379,4 +380,113 @@ test("확률 보상은 상호작용 종류별이며 같은 시드와 좌표에�
   const first = rollInteractionReward("thicket", 17, -4, 1234, 2);
   const again = rollInteractionReward("thicket", 17, -4, 1234, 2);
   assert.deepEqual(first, again);
+});
+
+
+// ---- 원정 경계와 개척 격자 --------------------------------------------------
+
+test("원정 경계는 마지막 신호기 고리 바깥에 있고 원 밖은 막힌다", () => {
+  assert.ok(WORLD_RADIUS > 140, "마지막 신호기(140)보다 멀어야 걸어갈 여지가 있다");
+  assert.ok(isInsideWorld(0, 0));
+  assert.ok(isInsideWorld(WORLD_RADIUS, 0));
+  assert.ok(!isInsideWorld(WORLD_RADIUS + 1, 0));
+  assert.ok(!isInsideWorld(WORLD_RADIUS, WORLD_RADIUS));
+
+  for (const seed of [1, 4242, 90210]) {
+    for (const mark of landmarkPositions(seed)) {
+      assert.ok(isInsideWorld(mark.tx, mark.ty), `신호기 ${mark.index}가 경계 밖이면 클리어할 수 없다`);
+    }
+  }
+});
+
+test("잠긴 지역 판정은 신호기 개수를 따른다", () => {
+  assert.equal(isLockedTile(0, 0, 0), false);
+  assert.equal(isLockedTile(100, 0, 0), true);
+  assert.equal(isLockedTile(100, 0, 4), false);
+});
+
+test("개척 격자는 셀 좌표와 인덱스를 오간다", () => {
+  assert.deepEqual(exploreCellOf(0, 0), { cx: 0, cy: 0 });
+  assert.deepEqual(exploreCellOf(-1, -1), { cx: -1, cy: -1 });
+  assert.equal(exploreIndexAt(3, 3), exploreCellIndex(0, 0));
+  assert.equal(exploreIndexAt(EXPLORE_CELL, 0), exploreCellIndex(1, 0));
+  assert.equal(exploreCellIndex(EXPLORE_SPAN, 0), -1, "격자 밖은 -1");
+  const center = exploreCellCenter(2, -3);
+  assert.equal(center.tx, 2 * EXPLORE_CELL + EXPLORE_CELL / 2);
+  assert.equal(center.ty, -3 * EXPLORE_CELL + EXPLORE_CELL / 2);
+});
+
+test("개척 대상 셀은 시드마다 정해지고 시작점에서 모두 이어진다", () => {
+  for (const seed of [7, 97, 1234, 2026]) {
+    const plan = explorationPlan(seed);
+    const again = explorationPlan(seed);
+    assert.equal(plan, again, "같은 시드는 같은 격자를 재사용한다");
+    assert.ok(plan.total > 400, `seed=${seed} total=${plan.total} 개척할 땅이 충분해야 한다`);
+    assert.ok(plan.total <= EXPLORE_SPAN * EXPLORE_SPAN);
+    assert.equal(plan.cells[exploreCellIndex(0, 0)], 1, "시작 셀은 항상 개척 대상이다");
+
+    // 사방으로 번져 나간 결과이므로 모든 대상 셀은 시작 셀과 이어져 있어야 한다.
+    let reachable = 0;
+    const seen = new Uint8Array(plan.cells.length);
+    const queue = [exploreCellIndex(0, 0)];
+    seen[queue[0]] = 1;
+    for (let head = 0; head < queue.length; head++) {
+      reachable++;
+      const index = queue[head];
+      const cx = (index % EXPLORE_SPAN) - (EXPLORE_SPAN - 1) / 2;
+      const cy = Math.floor(index / EXPLORE_SPAN) - (EXPLORE_SPAN - 1) / 2;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const next = exploreCellIndex(cx + dx, cy + dy);
+        if (next < 0 || seen[next] || !plan.cells[next]) continue;
+        seen[next] = 1;
+        queue.push(next);
+      }
+    }
+    assert.equal(reachable, plan.total, `seed=${seed} 닿을 수 없는 칸이 분모에 있으면 100%가 불가능하다`);
+
+    // 경계에 걸친 셀은 세도 되지만, 경계 안 타일이 하나도 없는 셀은 셀 수 없다.
+    for (let index = 0; index < plan.cells.length; index++) {
+      if (!plan.cells[index]) continue;
+      const cx = (index % EXPLORE_SPAN) - (EXPLORE_SPAN - 1) / 2;
+      const cy = Math.floor(index / EXPLORE_SPAN) - (EXPLORE_SPAN - 1) / 2;
+      let touchesWorld = false;
+      for (let oy = 0; oy < EXPLORE_CELL && !touchesWorld; oy++) {
+        for (let ox = 0; ox < EXPLORE_CELL; ox++) {
+          if (isInsideWorld(cx * EXPLORE_CELL + ox, cy * EXPLORE_CELL + oy)) { touchesWorld = true; break; }
+        }
+      }
+      assert.ok(touchesWorld, `경계 밖 셀 ${cx},${cy}`);
+    }
+  }
+});
+
+test("타일 캐시를 켜도 시드를 오가며 같은 지형이 나온다", () => {
+  const probe = [[0, 0], [12, -7], [-33, 41], [120, 5], [-149, 12]];
+  const first = probe.map(([x, y]) => [biomeAt(x, y, 4242), obstacleAt(x, y, 4242)]);
+  // 다른 시드를 계산해 캐시를 비운 뒤 되돌아온다.
+  for (const [x, y] of probe) { biomeAt(x, y, 777); obstacleAt(x, y, 777); }
+  const second = probe.map(([x, y]) => [biomeAt(x, y, 4242), obstacleAt(x, y, 4242)]);
+  assert.deepEqual(second, first);
+});
+
+
+test("경계 밖 타일은 지형 대신 여백으로 그린다", () => {
+  const fills = [];
+  const ctx = new Proxy({}, {
+    get: () => () => {},
+    set: (target, prop, value) => {
+      if (prop === "fillStyle") fills.push(String(value));
+      return true;
+    }
+  });
+
+  // 세계 한가운데: 여백 색이 나오면 안 된다.
+  drawTerrain(ctx, 0, 0, 384, 216, 1234, new Set(), 5, 0);
+  assert.ok(fills.length > 0);
+  assert.ok(!fills.some(fill => /^rgb\(\d/.test(fill)), "안쪽에서는 여백을 그리지 않는다");
+
+  // 경계에 걸친 카메라: 여백 색이 나와야 한다.
+  fills.length = 0;
+  drawTerrain(ctx, (WORLD_RADIUS - 6) * 16, 0, 384, 216, 1234, new Set(), 5, 0);
+  assert.ok(fills.some(fill => /^rgb\(\d/.test(fill)), "경계 밖은 여백으로 칠한다");
 });

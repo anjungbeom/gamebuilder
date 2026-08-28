@@ -19,7 +19,7 @@
 <meta name="twitter:image" content="https://anjungbeom.github.io/gamebuilder/thumbnail.png">
 <link rel="manifest" href="manifest.webmanifest">
 <title>Drawn Frontier — 그림으로 도구를 만들고 개척하기! ✨</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?rev=9">
 </head>
 <body>
 <div id="frame">
@@ -49,21 +49,21 @@
     <div id="progress" class="panel" hidden>
       <div><b id="p-marks">탐색</b><span>신호기</span></div>
       <div><b id="p-catalog">0</b><span>발견한 종</span></div>
-      <div><b id="p-depth">탐사</b><span>이동</span></div>
+      <div><b id="p-explored">0%</b><span>개척률</span></div>
       <div><b id="p-captures">0</b><span>적대 포획</span></div>
       <div><b id="p-ink">10</b><span>잉크</span></div>
     </div>
 
     <div id="map-panel" class="panel" hidden>
-      <div class="map-head"><span>현장 나침반</span><b id="map-coord">0 · 0</b></div>
+      <div class="map-head"><span id="map-explored">개척 0%</span><b id="map-coord">0 · 0</b></div>
       <canvas id="minimap" width="88" height="64" aria-label="주변 지형 지도"></canvas>
       <div id="goal-text" class="goal-text">가장 가까운 신호기를 찾는 중</div>
     </div>
 
-    <div id="hint" class="hint" hidden></div>
-    <div id="toast" class="toast" hidden></div>
-    <div id="celebration" class="celebration" hidden></div>
-    <div id="reward-feed" class="reward-feed" hidden></div>
+    <div id="hint" class="hint" hidden aria-hidden="true"></div>
+    <div id="toast" class="toast" hidden role="status" aria-live="polite"></div>
+    <div id="celebration" class="celebration" hidden role="status" aria-live="polite"></div>
+    <div id="reward-feed" class="reward-feed" hidden aria-live="polite"></div>
 
     <!-- 그리기 화면 -->
     <div id="draw-layer" hidden>
@@ -89,7 +89,42 @@
     <!-- 타이틀 / 도감 / 결말 -->
     <div id="overlay" hidden></div>
   </div>
+
+  <!-- 모바일 정보판: HUD가 화면을 덮지 않도록 패널을 캔버스 아래로 옮겨 담는다 -->
+  <div id="hud-dock" hidden></div>
+
+  <!-- 터치 조작: 손가락 입력이 처음 들어온 순간 열린다 -->
+  <div id="touch-controls" hidden>
+    <div id="touch-stick" role="application" aria-label="이동 스틱"><i id="touch-nub" aria-hidden="true"></i></div>
+
+    <div class="touch-face">
+      <button type="button" class="face face-y" data-touch-action="wire">와이어</button>
+      <button type="button" class="face face-x" data-touch-action="dodge">회피</button>
+      <button type="button" class="face face-b" data-touch-action="parry">패링</button>
+      <button type="button" class="face face-a" data-touch-action="attack">사용</button>
+      <button type="button" class="face face-lock" data-touch-action="lockOn">락온</button>
+      <button type="button" id="touch-menu-open" class="face face-menu">메뉴</button>
+    </div>
+  </div>
+
+  <!-- 나머지 조작은 모바일에서만 메뉴로 모은다 -->
+  <div id="touch-menu" hidden>
+    <div class="touch-menu-sheet" role="dialog" aria-modal="true" aria-label="조작 메뉴">
+      <div class="touch-menu-grid">
+        <button type="button" data-touch-action="draw">도구 설계</button>
+        <button type="button" data-touch-action="capture">포획·길들이기</button>
+        <button type="button" data-touch-action="throw">도구 투척</button>
+        <button type="button" data-touch-action="jump">점프</button>
+        <button type="button" data-touch-action="reflector">반사 방벽</button>
+        <button type="button" data-touch-action="inventory">장비 가방</button>
+        <button type="button" data-touch-action="map">개척 지도</button>
+        <button type="button" data-touch-action="dex">크리처 도감</button>
+        <button type="button" data-touch-action="challenges">도전과제</button>
+      </div>
+      <button type="button" class="touch-menu-close" data-touch-close>닫기</button>
+    </div>
+  </div>
 </div>
-<script type="module" src="src/game.js?rev=8"></script>
+<script type="module" src="src/game.js?rev=9"></script>
 </body>
 </html>

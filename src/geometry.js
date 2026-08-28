@@ -1,7 +1,7 @@
 // 그림의 기하 특성을 도구 성능으로 바꾸는 순수 로직.
 // 무엇을 그렸는지 알아맞히지 않는다. 어떻게 생겼는지만 잰다.
 
-import { clamp } from "./rng.js";
+import { clamp } from "./rng.js?rev=9";
 
 /** 획을 일정 간격으로 다시 찍는다. 손떨림이 만드는 가짜 뾰족함을 지운다. */
 export function resample(points, spacing = 7) {

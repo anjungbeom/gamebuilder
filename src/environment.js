@@ -1,7 +1,7 @@
 // 이동한 거리를 기준으로 낮밤과 날씨를 재현한다. 가만히 있으면 환경 시간도 멈춘다.
 
-import { clamp, hashUnit } from "./rng.js";
-import { BIOME } from "./world.js";
+import { clamp, hashUnit } from "./rng.js?rev=9";
+import { BIOME } from "./world.js?rev=9";
 
 export const DAY_DISTANCE = 180;
 export const WEATHER_DISTANCE = 42;

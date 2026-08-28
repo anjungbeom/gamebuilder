@@ -1,4 +1,4 @@
-import { clamp } from "./rng.js";
+import { clamp } from "./rng.js?rev=9";
 
 export function creatureRewardProfile(genome, hostile, ranged, rank = "normal") {
   const boss = rank === "normal" ? 0 : 1;

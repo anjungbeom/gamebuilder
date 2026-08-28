@@ -1,7 +1,7 @@
-// 시드와 좌표만으로 결정되는 무한 세계.
-// 어떤 타일도 저장하지 않는다. 같은 곳에 돌아오면 같은 풍경이 다시 계산된다.
+// 시드와 좌표만으로 결정되는 세계.
+// 지형은 좌표 함수라 어디서 계산해도 같은 풍경이 나오고, 한 번의 원정은 그중 경계 안을 개척한다.
 
-import { fbm, hashUnit, hash2, clamp, lerp } from "./rng.js";
+import { fbm, hashUnit, hash2, clamp, lerp } from "./rng.js?rev=9";
 
 export const TILE = 16;
 
@@ -34,6 +34,21 @@ export function frontierRegionAt(tx, ty) {
 
 export function regionRequiredMarksAt(tx, ty) {
   return Math.min(4, frontierRegionAt(tx, ty).index);
+}
+
+// ---- 원정 경계 -------------------------------------------------------------
+// 지형 계산은 무한하지만 한 번의 원정이 개척해야 할 땅은 이 반경 안이 전부다.
+// 마지막 신호기 고리(140)보다 조금 넉넉하게 잡아 끝자락에도 걸을 여지를 남긴다.
+
+export const WORLD_RADIUS = 150;
+
+export function isInsideWorld(tx, ty) {
+  return tx * tx + ty * ty <= WORLD_RADIUS * WORLD_RADIUS;
+}
+
+/** 아직 신호기가 모자라 들어갈 수 없는 타일인지. */
+export function isLockedTile(tx, ty, foundCount) {
+  return regionRequiredMarksAt(tx, ty) > foundCount;
 }
 
 export const OBSTACLE = {
@@ -83,7 +98,7 @@ export function moistureAt(tx, ty, seed) {
   return fbm(tx * 0.032 + 120.5, ty * 0.032 - 88.25, seed + 3331, 3);
 }
 
-export function biomeAt(tx, ty, seed) {
+function computeBiome(tx, ty, seed) {
   const e = elevationAt(tx, ty, seed);
   const m = moistureAt(tx, ty, seed);
   const region = frontierRegionAt(tx, ty).index;
@@ -123,7 +138,7 @@ export function biomeAt(tx, ty, seed) {
 }
 
 /** 걸을 수 있는 땅 위에만 장애물이 놓인다. */
-export function obstacleAt(tx, ty, seed) {
+function computeObstacle(tx, ty, seed) {
   const biome = biomeAt(tx, ty, seed);
   if (biome === BIOME.DEEP || biome === BIOME.WATER || biome === BIOME.ROCK) return OBSTACLE.NONE;
   if (Math.hypot(tx, ty) < 4) return OBSTACLE.NONE;
@@ -149,6 +164,57 @@ export function obstacleAt(tx, ty, seed) {
     return OBSTACLE.NONE;
   }
   return OBSTACLE.NONE;
+}
+
+// ---- 타일 캐시 -------------------------------------------------------------
+// 경계가 생긴 덕분에 세계 전체를 고정 크기 배열 두 개로 기억할 수 있다.
+// 같은 타일을 프레임마다 다시 계산하던 비용이 첫 방문 한 번으로 줄어든다.
+
+const CACHE_ORIGIN = WORLD_RADIUS + 1;
+const CACHE_SPAN = CACHE_ORIGIN * 2 + 1;
+const BIOME_ORDER = [BIOME.DEEP, BIOME.WATER, BIOME.SAND, BIOME.PLAIN, BIOME.GRASS, BIOME.FOREST, BIOME.ROCK];
+const OBSTACLE_ORDER = [OBSTACLE.NONE, OBSTACLE.BOULDER, OBSTACLE.THICKET, OBSTACLE.BRAMBLE, OBSTACLE.TREE, OBSTACLE.MOUNTAIN];
+
+let cacheSeed = null;
+let biomeCache = null;
+let obstacleCache = null;
+
+/** 경계 안 정수 좌표만 캐시한다. 그 밖은 그때그때 계산한다. */
+function cacheIndex(tx, ty, seed) {
+  if (!Number.isInteger(tx) || !Number.isInteger(ty)) return -1;
+  const x = tx + CACHE_ORIGIN;
+  const y = ty + CACHE_ORIGIN;
+  if (x < 0 || y < 0 || x >= CACHE_SPAN || y >= CACHE_SPAN) return -1;
+
+  if (seed !== cacheSeed) {
+    cacheSeed = seed;
+    if (biomeCache) { biomeCache.fill(0); obstacleCache.fill(0); }
+    else {
+      biomeCache = new Uint8Array(CACHE_SPAN * CACHE_SPAN);
+      obstacleCache = new Uint8Array(CACHE_SPAN * CACHE_SPAN);
+    }
+  }
+  return y * CACHE_SPAN + x;
+}
+
+export function biomeAt(tx, ty, seed) {
+  const index = cacheIndex(tx, ty, seed);
+  if (index < 0) return computeBiome(tx, ty, seed);
+  const cached = biomeCache[index];
+  if (cached) return BIOME_ORDER[cached - 1];
+  const biome = computeBiome(tx, ty, seed);
+  biomeCache[index] = BIOME_ORDER.indexOf(biome) + 1;
+  return biome;
+}
+
+export function obstacleAt(tx, ty, seed) {
+  const index = cacheIndex(tx, ty, seed);
+  if (index < 0) return computeObstacle(tx, ty, seed);
+  const cached = obstacleCache[index];
+  if (cached) return OBSTACLE_ORDER[cached - 1];
+  const obstacle = computeObstacle(tx, ty, seed);
+  obstacleCache[index] = OBSTACLE_ORDER.indexOf(obstacle) + 1;
+  return obstacle;
 }
 
 /** 지형만 보고 막혔는지. 장애물은 별도로 확인한다. */
@@ -205,6 +271,93 @@ export function landmarkPositions(seed) {
     );
   }
   return out;
+}
+
+// ---- 개척 격자 -------------------------------------------------------------
+// 개척률은 타일이 아니라 8x8 셀 단위로 센다.
+// 분모는 경계 안에서 시작점과 이어지는 셀만 — 닿을 수 없는 땅은 애초에 세지 않는다.
+
+export const EXPLORE_CELL = 8;
+export const EXPLORE_MIN = -Math.ceil(WORLD_RADIUS / EXPLORE_CELL);
+export const EXPLORE_SPAN = -EXPLORE_MIN * 2 + 1;
+
+export function exploreCellOf(tx, ty) {
+  return { cx: Math.floor(tx / EXPLORE_CELL), cy: Math.floor(ty / EXPLORE_CELL) };
+}
+
+/** 셀 좌표를 비트맵 인덱스로. 경계 밖이면 -1. */
+export function exploreCellIndex(cx, cy) {
+  const x = cx - EXPLORE_MIN;
+  const y = cy - EXPLORE_MIN;
+  if (x < 0 || y < 0 || x >= EXPLORE_SPAN || y >= EXPLORE_SPAN) return -1;
+  return y * EXPLORE_SPAN + x;
+}
+
+/** 타일이 속한 셀의 비트맵 인덱스. */
+export function exploreIndexAt(tx, ty) {
+  const { cx, cy } = exploreCellOf(tx, ty);
+  return exploreCellIndex(cx, cy);
+}
+
+/** 셀 중심의 타일 좌표. 나침반과 지도 표시에 쓴다. */
+export function exploreCellCenter(cx, cy) {
+  const half = EXPLORE_CELL >> 1;
+  return { tx: cx * EXPLORE_CELL + half, ty: cy * EXPLORE_CELL + half };
+}
+
+const CELL_SAMPLES = [[4, 4], [1, 1], [6, 1], [1, 6], [6, 6]];
+
+/** 셀 안에 설 수 있는 땅이 하나라도 있는지. 깊은 물과 바위는 설 수 없다. */
+function cellPassable(cx, cy, seed) {
+  const baseX = cx * EXPLORE_CELL;
+  const baseY = cy * EXPLORE_CELL;
+  for (const [ox, oy] of CELL_SAMPLES) {
+    const tx = baseX + ox;
+    const ty = baseY + oy;
+    if (!isInsideWorld(tx, ty)) continue;
+    if (!isBiomeSolid(biomeAt(tx, ty, seed))) return true;
+  }
+  return false;
+}
+
+const planCache = new Map();
+
+/**
+ * 시드마다 한 번만 계산하는 개척 대상 격자.
+ * 시작 셀에서 사방으로 번져 나가며 통행 가능한 셀만 모으므로 100%가 항상 도달 가능하다.
+ */
+export function explorationPlan(seed) {
+  const cached = planCache.get(seed);
+  if (cached) return cached;
+
+  const cells = new Uint8Array(EXPLORE_SPAN * EXPLORE_SPAN);
+  const start = exploreCellIndex(0, 0);
+  let total = 0;
+
+  if (start >= 0 && cellPassable(0, 0, seed)) {
+    const queue = [start];
+    cells[start] = 1;
+    total = 1;
+    for (let head = 0; head < queue.length; head++) {
+      const index = queue[head];
+      const cx = (index % EXPLORE_SPAN) + EXPLORE_MIN;
+      const cy = Math.floor(index / EXPLORE_SPAN) + EXPLORE_MIN;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nextIndex = exploreCellIndex(cx + dx, cy + dy);
+        if (nextIndex < 0 || cells[nextIndex]) continue;
+        if (!cellPassable(cx + dx, cy + dy, seed)) continue;
+        cells[nextIndex] = 1;
+        total++;
+        queue.push(nextIndex);
+      }
+    }
+  }
+
+  const plan = { cells, total };
+  planCache.set(seed, plan);
+  // 시드를 바꿔가며 놀아도 격자가 쌓이지 않도록 최근 것만 남긴다.
+  if (planCache.size > 4) planCache.delete(planCache.keys().next().value);
+  return plan;
 }
 
 // ---- 크리처 서식 ---------------------------------------------------------
