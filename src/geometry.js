@@ -102,6 +102,7 @@ const EMPTY_STATS = {
   grip: 0,
   ink: 0,
   durability: 0,
+  inkPx: 0,
   spanPx: 0,
   areaPx: 0,
   strokeCount: 0
@@ -147,6 +148,7 @@ export function analyzeStrokes(strokes, padW, padH) {
     grip: clamp((openEnds - 2) / 6, 0, 1),
     ink: clamp(inkPx / (diagonal * 4), 0, 1),
     durability: Math.round(3 + clamp(inkPx / (diagonal * 4), 0, 1) * 9),
+    inkPx,
     spanPx,
     areaPx,
     strokeCount: usable.length

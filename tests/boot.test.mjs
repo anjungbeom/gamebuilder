@@ -2,6 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildGenome } from "../src/creature.js";
+import { TILE, villagePositions } from "../src/world.js";
 
 function makeEl(id = "") {
   const el = {
@@ -338,6 +339,24 @@ test("저장을 다시 불러도 같은 세계다", () => {
   assert.equal(after.seed, before.seed);
 });
 
+test("이어하기는 저장 좌표 대신 마지막 NPC 마을에서 재개한다", () => {
+  const saved = JSON.parse(store.get("drawn-frontier-v2"));
+  saved.px = 9999;
+  saved.py = -9999;
+  saved.found = [0];
+  saved.lastVillageIndex = 1;
+  store.set("drawn-frontier-v2", JSON.stringify(saved));
+
+  const overlay = getEl("overlay");
+  const continueBtn = makeEl(); continueBtn.dataset.act = "continue";
+  overlay._handlers.get("click")({ target: { closest: () => continueBtn } });
+
+  const village = villagePositions(saved.seed).find(candidate => candidate.index === 1);
+  const after = JSON.parse(store.get("drawn-frontier-v2"));
+  assert.equal(after.px, village.tx * TILE + TILE / 2);
+  assert.equal(after.py, village.ty * TILE + TILE / 2 + 5);
+});
+
 test("이전 저장의 어색한 장비 이름은 현재 성능 이름으로 바뀐다", () => {
   const legacy = JSON.parse(store.get("drawn-frontier-v2"));
   assert.ok(legacy.gear.hand.length > 0);
@@ -351,4 +370,33 @@ test("이전 저장의 어색한 장비 이름은 현재 성능 이름으로 바
   winHandlers.get("keydown")(key("Tab"));
   assert.doesNotMatch(overlay.innerHTML, /개척자 명조/);
   assert.match(overlay.innerHTML, /장비 가방/);
+});
+
+test("환경설정에서 패링 키와 제한 애니메이션을 바꾸고 저장 캐시를 초기화한다", () => {
+  const overlay = getEl("overlay");
+  const click = overlay._handlers.get("click");
+  const down = winHandlers.get("keydown");
+
+  const settingsBtn = makeEl(); settingsBtn.dataset.act = "settings";
+  click({ target: { closest: () => settingsBtn } });
+  assert.match(overlay.innerHTML, /환경설정/);
+  assert.match(overlay.innerHTML, /제한된 애니메이션/);
+
+  const rebindBtn = makeEl(); rebindBtn.dataset.act = "rebind"; rebindBtn.dataset.keyAction = "parry";
+  click({ target: { closest: () => rebindBtn } });
+  down(key("KeyK"));
+  let prefs = JSON.parse(store.get("drawn-frontier-settings-v1"));
+  assert.equal(prefs.keymap.parry, "KeyK");
+
+  const animationBtn = makeEl(); animationBtn.dataset.act = "toggle-animation";
+  click({ target: { closest: () => animationBtn } });
+  prefs = JSON.parse(store.get("drawn-frontier-settings-v1"));
+  assert.equal(prefs.animation, "limited");
+
+  const resetBtn = makeEl(); resetBtn.dataset.act = "reset-cache";
+  click({ target: { closest: () => resetBtn } });
+  const confirmBtn = makeEl(); confirmBtn.dataset.act = "confirm-reset-cache";
+  click({ target: { closest: () => confirmBtn } });
+  assert.equal(store.has("drawn-frontier-v2"), false);
+  assert.equal(JSON.parse(store.get("drawn-frontier-settings-v1")).keymap.parry, "KeyK", "캐시 초기화 후에도 키 설정은 유지된다");
 });

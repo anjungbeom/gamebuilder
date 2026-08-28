@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0d1420">
+<meta name="theme-color" content="#fff4c7">
 <meta name="description" content="직접 그린 도구로 길을 열고 다섯 지역의 신호기를 활성화하는 절차 생성 탐험 게임.">
 <link rel="canonical" href="https://anjungbeom.github.io/gamebuilder/">
 <meta property="og:type" content="website">
@@ -43,7 +43,7 @@
       <div class="shoe-line"><span>신발</span><b id="shoe-name">기본 장화</b></div>
       <div class="environment-line"><span id="env-time">낮</span><b id="env-weather">맑음</b></div>
       <div class="environment-line"><span id="env-temp">18°C · 쾌적</span><b id="env-noise">조용함</b></div>
-      <div class="palette-key"><kbd>Space</kbd> 방향 공격 · <kbd>P</kbd> 패링 · <kbd>F</kbd> 포획 · <kbd>V</kbd> 도전 · <kbd>M</kbd> 지도</div>
+      <div id="palette-key" class="palette-key"><kbd>Space</kbd> 공격 · <kbd>P</kbd> 패링 · <kbd>Z</kbd> 회피 · <kbd>F</kbd> 포획 · <kbd>V</kbd> 도전 · <kbd>M</kbd> 지도</div>
     </div>
 
     <div id="progress" class="panel" hidden>
@@ -90,6 +90,6 @@
     <div id="overlay" hidden></div>
   </div>
 </div>
-<script type="module" src="src/game.js"></script>
+<script type="module" src="src/game.js?rev=4"></script>
 </body>
 </html>
