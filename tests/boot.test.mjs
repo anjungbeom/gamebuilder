@@ -145,6 +145,18 @@ test("도구를 그려 확정하면 저장에 남는다", () => {
   assert.equal(save.ink, 9, "한 획짜리 장비는 잉크 하나를 사용한다");
 });
 
+test("T 투척은 장착 도구를 가방에서 제거하고 게임 루프를 유지한다", () => {
+  const down = winHandlers.get("keydown");
+  down(key("KeyT"));
+  const thrown = JSON.parse(store.get("drawn-frontier-v2"));
+  assert.equal(thrown.tool, null);
+  assert.equal(thrown.equipped.hand, null);
+  assert.equal(thrown.gear.hand.length, 0);
+  let t = 5300;
+  for (let i = 0; i < 35; i++) { frameCb(t); t += 16; }
+  assert.equal(typeof frameCb, "function");
+});
+
 test("지우기 모드에서 선택한 획 하나만 제거된다", () => {
   const down = winHandlers.get("keydown");
   down(key("KeyQ"));
@@ -165,8 +177,8 @@ test("지우기 모드에서 선택한 획 하나만 제거된다", () => {
   down(key("Enter"));
 
   const save = JSON.parse(store.get("drawn-frontier-v2"));
-  assert.equal(save.gear.hand.length, 2);
-  assert.equal(save.gear.hand[1].strokes.length, 1);
+  assert.equal(save.gear.hand.length, 1);
+  assert.equal(save.gear.hand[0].strokes.length, 1);
 });
 
 test("Tab 장비 가방에서 신발을 그려 장착한다", () => {

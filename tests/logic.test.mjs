@@ -11,11 +11,11 @@ import { drawCreature, drawPlayer, drawCraftingReveal } from "../src/render.js";
 import {
   creatureMaxHp, bossWeakness, attackDamage, captureThresholdAtHp,
   inAttackArc, parryDisarmDuration, directionalWeaknessAllows,
-  creatureAttackProfile, parryTiming, dodgeTiming
+  creatureAttackProfile, parryTiming, dodgeTiming, lockSafeDodgeDirection
 } from "../src/combat.js";
 import { creatureRewardProfile, scoreCreatureActions, scoreVillagerActions, scorePetActions, selectRewardAction } from "../src/behavior.js";
 import { challengeRows, nextChallenge } from "../src/challenges.js";
-import { handToolProfile, petToolStats, drawingLengthState, milestoneLengthBudget } from "../src/equipment.js";
+import { handToolProfile, petToolStats, drawingLengthState, milestoneLengthBudget, toolThrowProfile } from "../src/equipment.js";
 import { DEFAULT_KEYMAP, normalizePreferences, rebindKey, actionForCode, keyLabel } from "../src/settings.js";
 import { environmentAt, thermalState, noiseLabel, DAY_DISTANCE } from "../src/environment.js";
 import {
@@ -245,6 +245,7 @@ test("키 재설정은 충돌 키를 교환하고 설정값을 안전하게 정�
   assert.equal(keyLabel("KeyK"), "K");
   assert.equal(normalizePreferences({ animation: "limited" }).animation, "limited");
   assert.equal(DEFAULT_KEYMAP.dodge, "Slash");
+  assert.equal(DEFAULT_KEYMAP.throw, "KeyT");
   assert.equal(DEFAULT_KEYMAP.dodgeLeft, undefined);
   assert.equal(DEFAULT_KEYMAP.dodgeRight, undefined);
 });
@@ -301,6 +302,28 @@ test("모든 적은 공통 예고-공격-회복 프로필을 쓰고 패링·회�
   assert.ok(parryTiming(0).window < .2, "패링은 긴 선입력이 아닌 짧은 타이밍 창이어야 한다");
   assert.ok(parryTiming(1).cooldown < parryTiming(0).cooldown);
   assert.ok(dodgeTiming().window > 0 && dodgeTiming().wireLink > dodgeTiming().window);
+  assert.ok(dodgeTiming().window * dodgeTiming().speed < .5, "기본 회피 거리는 이전보다 짧아야 한다");
+  assert.ok(dodgeTiming({ speed: 1, stability: 1 }).window * dodgeTiming({ speed: 1, stability: 1 }).speed
+    > dodgeTiming().window * dodgeTiming().speed, "좋은 신발은 회피 거리를 늘려야 한다");
+});
+
+test("락온 회피는 모멘텀을 쓰되 대상에게 가까워지는 성분을 제거한다", () => {
+  const diagonal = lockSafeDodgeDirection(1, 1, 1, 0, 1);
+  assert.ok(diagonal.x <= 1e-9, `대상 쪽 성분=${diagonal.x}`);
+  assert.ok(diagonal.y > 0);
+  const straight = lockSafeDodgeDirection(1, 0, 1, 0, -1);
+  assert.ok(straight.x <= 1e-9, `정면 대시는 접선으로 빠져야 한다: ${straight.x}`);
+  assert.ok(straight.y < 0);
+  const outward = lockSafeDodgeDirection(-1, 0, 1, 0, 1);
+  assert.deepEqual(outward, { x: -1, y: 0 });
+});
+
+test("조밀하고 무거운 도구는 투척 위력이 높고 가벼운 도구는 더 멀리 간다", () => {
+  const heavy = toolThrowProfile({ ink: .95, buoy: .8, reach: .15 }, { impact: .9, reach: .15 });
+  const light = toolThrowProfile({ ink: .08, buoy: 0, reach: .9 }, { impact: .1, reach: .9 });
+  assert.ok(heavy.weight > light.weight);
+  assert.ok(heavy.damage > light.damage);
+  assert.ok(light.range > heavy.range);
 });
 
 test("보스는 내려찍기·물기·사격 준비의 별도 도트 프레임을 안전하게 그린다", () => {

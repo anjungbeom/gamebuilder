@@ -71,8 +71,34 @@ export function parryTiming(guard = 0) {
   };
 }
 
-export function dodgeTiming() {
-  return { window: .20, cooldown: .58, speed: 3.15, wireLink: .55 };
+export function dodgeTiming(shoes = null) {
+  const shoeSpeed = clamp(shoes?.speed ?? 0, 0, 1);
+  const stability = clamp(shoes?.stability ?? 0, 0, 1);
+  return {
+    window: .18,
+    cooldown: .64 - stability * .08,
+    speed: 2.38 + shoeSpeed * .62 + stability * .18,
+    wireLink: .50 + stability * .10
+  };
+}
+
+// 락온 중에는 최근 이동 모멘텀을 유지하되 대상에게 가까워지는 성분만
+// 제거한다. 정면 모멘텀만 남으면 마지막 선회 방향의 접선으로 빠진다.
+export function lockSafeDodgeDirection(momentumX, momentumY, targetX, targetY, side = 1) {
+  const momentumLength = Math.hypot(momentumX, momentumY) || 1;
+  const targetLength = Math.hypot(targetX, targetY) || 1;
+  const mx = momentumX / momentumLength;
+  const my = momentumY / momentumLength;
+  const tx = targetX / targetLength;
+  const ty = targetY / targetLength;
+  const inward = mx * tx + my * ty;
+  if (inward <= 0) return { x: mx, y: my };
+  const safeX = mx - tx * inward;
+  const safeY = my - ty * inward;
+  const safeLength = Math.hypot(safeX, safeY);
+  if (safeLength > .08) return { x: safeX / safeLength, y: safeY / safeLength };
+  const turn = side < 0 ? -1 : 1;
+  return { x: -ty * turn, y: tx * turn };
 }
 
 export function directionalWeaknessAllows(dx, dy, direction) {

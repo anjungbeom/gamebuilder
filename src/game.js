@@ -13,7 +13,7 @@ import { buildGenome, catchThreshold } from "./creature.js";
 import {
   WEAKNESS_LABELS, creatureMaxHp, bossWeakness, attackDamage, captureThresholdAtHp,
   inAttackArc, parryDisarmDuration, directionalWeaknessAllows,
-  creatureAttackProfile, parryTiming, dodgeTiming
+  creatureAttackProfile, parryTiming, dodgeTiming, lockSafeDodgeDirection
 } from "./combat.js";
 import {
   PROGRESSION_TIERS, tierForFragments, progressionEffects, craftingCost,
@@ -22,8 +22,8 @@ import {
 import { environmentAt, thermalState, noiseLabel } from "./environment.js";
 import { creatureRewardProfile, scoreCreatureActions, scoreVillagerActions, scorePetActions, selectRewardAction } from "./behavior.js";
 import { ROTATING_TIPS, challengeRows, challengeState, nextChallenge } from "./challenges.js";
-import { handToolProfile, petToolStats, drawingLengthState, milestoneLengthBudget } from "./equipment.js?rev=6";
-import { KEY_ACTIONS, DEFAULT_KEYMAP, normalizePreferences, rebindKey, actionForCode, keyLabel } from "./settings.js?rev=6";
+import { handToolProfile, petToolStats, drawingLengthState, milestoneLengthBudget, toolThrowProfile } from "./equipment.js?rev=8";
+import { KEY_ACTIONS, DEFAULT_KEYMAP, normalizePreferences, rebindKey, actionForCode, keyLabel } from "./settings.js?rev=8";
 import {
   drawTerrain, drawLandmark, drawCreature, drawPlayer, drawHeldTool, drawCraftingReveal, drawVignette,
   drawDeathDrops, drawParryEffect, drawAtmosphere, drawRevealEffect,
@@ -149,6 +149,7 @@ let deathDrops = [];
 let villagers = [];
 let smokeEffects = [];
 let successEffects = [];
+let toolBreakEffects = [];
 let projectiles = [];
 let wireState = null;
 let deathState = null;
@@ -198,6 +199,10 @@ function newGame(seed) {
     dodgeLinkTimer: 0,
     dodgeX: 1,
     dodgeY: 0,
+    moveMomentumX: 1,
+    moveMomentumY: 0,
+    dodgeSide: 1,
+    throwCooldown: 0,
     bindTimer: 0,
     knockX: 0,
     knockY: 0,
@@ -283,6 +288,7 @@ function save() {
         rawStats: game.tool.rawStats,
         stats: game.tool.stats,
         toolType: game.tool.toolType,
+        throwProfile: game.tool.throwProfile,
         name: game.tool.name,
         color: game.tool.color,
         durability: game.tool.durability,
@@ -338,6 +344,7 @@ function refreshSavedGearNames(g) {
       item.stats = profile.stats;
       item.lengthBudget = drawingLengthState(raw, item.createdMilestone ?? g.milestone);
       item.toolType = profile.type;
+      item.throwProfile = toolThrowProfile(raw, profile.stats);
       item.name = `${profile.type.label} ${nameTool(profile.stats, Math.round(raw.spanPx ?? 0))}`;
     }
   }
@@ -1093,9 +1100,30 @@ function updateProjectiles(dt) {
   const kept = [];
   for (const projectile of projectiles) {
     projectile.life -= dt;
-    if (projectile.life <= 0) continue;
+    if (projectile.life <= 0) {
+      if (projectile.kind === "tool") shatterThrownTool(projectile);
+      continue;
+    }
     projectile.x += projectile.vx * dt;
     projectile.y += projectile.vy * dt;
+
+    if (projectile.kind === "tool") {
+      projectile.distance += Math.hypot(projectile.vx * dt, projectile.vy * dt);
+      if (hitCreatureWithThrownTool(projectile)) {
+        shatterThrownTool(projectile);
+        continue;
+      }
+      const tx = Math.floor(projectile.x / TILE);
+      const ty = Math.floor(projectile.y / TILE);
+      const biome = biomeAt(tx, ty, game.seed);
+      if (projectile.distance >= projectile.profile.range || isBiomeSolid(biome)
+        || regionRequiredMarksAt(tx, ty) > game.found.size) {
+        shatterThrownTool(projectile);
+        continue;
+      }
+      kept.push(projectile);
+      continue;
+    }
 
     const playerDistance = Math.hypot(projectile.x - game.px, projectile.y - game.py);
     if (!projectile.reflected && (game.parryTimer > 0 || game.reflectorTimer > 0) && playerDistance < 16 + (game.tool?.stats.reach ?? 0) * 10) {
@@ -1192,6 +1220,7 @@ function buildGear(strokes, slot = "hand") {
   const shoeStats = shoeStatsFrom(rawStats);
   const companionStats = petToolStats(rawStats);
   const stats = slot === "hand" ? handProfile.stats : rawStats;
+  const throwProfile = toolThrowProfile(rawStats, handProfile.stats);
   const durability = slot === "shoes"
     ? Math.round(5 + shoeStats.endurance * 18) + resonanceBonus
     : rawStats.durability + resonanceBonus + (slot === "hand" ? Math.round(handProfile.stats.efficiency * 3) : 0);
@@ -1206,6 +1235,7 @@ function buildGear(strokes, slot = "hand") {
     shoeStats,
     petStats: companionStats,
     toolType: handProfile.type,
+    throwProfile,
     name: slot === "shoes" ? nameShoes(shoeStats) : slot === "pet" ? `동행 ${nameTool(rawStats, Math.round(rawStats.spanPx))}` : `${handProfile.type.label} ${nameTool(stats, Math.round(rawStats.spanPx))}`,
     color: TRAIT_COLOR[dominant],
     durability,
@@ -1318,7 +1348,7 @@ function respawnPlayer() {
   }
   deathDrops = [];
   deathState = null;
-  creatures.clear(); projectiles = []; wireState = null;
+  creatures.clear(); projectiles = []; toolBreakEffects = []; wireState = null;
   saveNow(); hideOverlay();
   toast(`${village.name}에서 다시 시작했다 — 잃은 물건은 현장에 남아 있다`, "good");
 }
@@ -1328,6 +1358,7 @@ function resetExpeditionAfterDeath() {
   game = newGame(seed);
   creatures.clear();
   projectiles = [];
+  toolBreakEffects = [];
   droppedItems = [];
   deathDrops = [];
   villagers = [];
@@ -1461,10 +1492,21 @@ function tryParry() {
 }
 
 function tryDodge() {
-  const timing = dodgeTiming();
+  const shoeStats = game.shoes?.shoeStats ?? null;
+  const timing = dodgeTiming(shoeStats);
   if (game.dodgeCooldown > 0 || game.bindTimer > 0 || deathState) return;
-  const dx = game.faceX || game.facing || 1;
-  const dy = game.faceY || 0;
+  let dx = game.moveMomentumX || game.facing || 1;
+  let dy = game.moveMomentumY || 0;
+  const locked = game.lockTargetKey ? creatures.get(game.lockTargetKey) : null;
+  if (locked?.hostile && locked.hp > 0 && Math.hypot(locked.x - game.px, locked.y - game.py) <= LOCK_RANGE * 1.08) {
+    const targetX = locked.x - game.px;
+    const targetY = locked.y - game.py;
+    const cross = targetX * dy - targetY * dx;
+    if (Math.abs(cross) > .08) game.dodgeSide = cross < 0 ? -1 : 1;
+    const safe = lockSafeDodgeDirection(dx, dy, targetX, targetY, game.dodgeSide);
+    dx = safe.x;
+    dy = safe.y;
+  }
   const length = Math.hypot(dx, dy) || 1;
   game.dodgeX = dx / length;
   game.dodgeY = dy / length;
@@ -1640,12 +1682,11 @@ function persistBossState(c) {
   });
 }
 
-function attackBossPart(c, part) {
-  const damage = Math.max(1, Math.round(1 + game.tool.stats.edge * 1.7 + game.tool.stats.reach * .7 + (game.tool.stats.impact ?? 0) * 1.4));
+function damageBossPart(c, part, damage, consumeTool = false) {
   part.hp = Math.max(0, part.hp - damage);
   c.hitFlash = .24;
   game.noise = clamp(game.noise + .3, 0, 1);
-  spendTool();
+  if (consumeTool) spendTool();
   if (part.hp > 0) {
     persistBossState(c);
     saveNow();
@@ -1678,6 +1719,46 @@ function attackBossPart(c, part) {
   dirty = true;
   persistBossState(c);
   saveNow();
+}
+
+function attackBossPart(c, part) {
+  const damage = Math.max(1, Math.round(1 + game.tool.stats.edge * 1.7 + game.tool.stats.reach * .7 + (game.tool.stats.impact ?? 0) * 1.4));
+  damageBossPart(c, part, damage, true);
+}
+
+function hitCreatureWithThrownTool(projectile) {
+  for (const c of creatures.values()) {
+    if (!c.hostile || c.hp <= 0) continue;
+    const activePart = c.bossParts?.find(part => part.active && !part.destroyed);
+    if (activePart) {
+      const px = c.x + activePart.ox;
+      const py = c.y + activePart.oy;
+      if (Math.hypot(projectile.x - px, projectile.y - py) <= 9) {
+        damageBossPart(c, activePart, projectile.profile.damage);
+        return true;
+      }
+      continue;
+    }
+    const hitRadius = Math.max(7, (c.genome.bodyRadius ?? 5) + 3);
+    if (Math.hypot(projectile.x - c.x, projectile.y - c.y) > hitRadius) continue;
+    if (c.rank !== "normal" && (!c.weaknessExposed
+      || !directionalWeaknessAllows(projectile.x - c.x, projectile.y - c.y, c.weaknessDirection))) {
+      toast("우두머리의 열린 약점 방향을 노려야 한다", "bad");
+      return true;
+    }
+    c.hp = Math.max(0, c.hp - projectile.profile.damage);
+    c.stun = Math.max(c.stun ?? 0, projectile.profile.stagger);
+    c.hitFlash = .3;
+    game.noise = clamp(game.noise + .24, 0, 1);
+    persistBossState(c);
+    if (c.hp <= 0) defeatCreature(c);
+    else {
+      toast(`${c.genome.name}에게 투척 타격`, projectile.profile.damage >= 4 ? "good" : "");
+      dirty = true;
+    }
+    return true;
+  }
+  return false;
 }
 
 function attackCreature(c) {
@@ -1777,6 +1858,75 @@ function useTool() {
   }
 
   toast("지금 도구에 반응하는 대상이 없다");
+}
+
+function tryThrowTool() {
+  if (!game.tool) {
+    toast(`던질 손도구가 없다 · ${binding("draw")}로 도구를 그리자`, "bad");
+    return;
+  }
+  if (game.throwCooldown > 0 || projectiles.some(projectile => projectile.kind === "tool")) return;
+  let dx = game.faceX || game.facing || 1;
+  let dy = game.faceY || 0;
+  const locked = game.lockTargetKey ? creatures.get(game.lockTargetKey) : null;
+  if (locked?.hostile && locked.hp > 0 && Math.hypot(locked.x - game.px, locked.y - game.py) <= LOCK_RANGE * 1.08) {
+    dx = locked.x - game.px;
+    dy = locked.y - game.py;
+  }
+  const length = Math.hypot(dx, dy) || 1;
+  dx /= length;
+  dy /= length;
+  const snapshot = {
+    name: game.tool.name,
+    color: game.tool.color,
+    strokes: game.tool.strokes
+  };
+  const profile = game.tool.throwProfile ?? toolThrowProfile(game.tool.rawStats ?? game.tool.stats, game.tool.stats);
+  projectiles.push({
+    kind: "tool",
+    x: game.px + dx * 8,
+    y: game.py - 3 + dy * 5,
+    vx: dx * profile.speed,
+    vy: dy * profile.speed,
+    distance: 0,
+    life: 1.6,
+    profile,
+    tool: snapshot
+  });
+  game.throwCooldown = .52 + profile.weight * .18;
+  game.swing = 1;
+  game.noise = clamp(game.noise + .2, 0, 1);
+  const thrownId = game.tool.id;
+  game.tool = null;
+  game.gear.hand = game.gear.hand.filter(item => item.id !== thrownId);
+  toast(`${snapshot.name}을 던졌다 · 충돌하면 부서진다`, "bad");
+  saveNow();
+}
+
+function shatterThrownTool(projectile) {
+  const points = projectile.tool.strokes.flatMap(stroke => stroke.filter((_point, index) => index % 2 === 0));
+  const count = clamp(points.length, 6, 18);
+  const baseAngle = Math.atan2(projectile.vy, projectile.vx);
+  const fragments = Array.from({ length: count }, (_, index) => {
+    const spread = ((index / Math.max(1, count - 1)) - .5) * Math.PI * 1.45;
+    const speed = 20 + (index % 5) * 4;
+    return {
+      vx: Math.cos(baseAngle + spread) * speed,
+      vy: Math.sin(baseAngle + spread) * speed - 10 - (index % 3) * 3,
+      size: index % 3 === 0 ? 3 : 2,
+      dark: index % 4 === 0
+    };
+  });
+  toolBreakEffects.push({
+    x: projectile.x,
+    y: projectile.y,
+    color: projectile.tool.color,
+    time: .72,
+    duration: .72,
+    fragments
+  });
+  toolBreakEffects = toolBreakEffects.slice(-6);
+  smokeEffects.push({ x: projectile.x, y: projectile.y, time: .42, duration: .42, count: 5, big: false });
 }
 
 function checkLandmarks() {
@@ -2314,7 +2464,7 @@ function updateHint() {
       : activePart ? ` · 파괴 대상 <b>${activePart.label}</b>` : "";
     const capturable = c.rank === "normal" && c.hp / c.maxHp <= 0.38 ? ` · <b>${binding("capture")}</b> 포획 가능` : "";
     const disarmed = c.disarmed > 0 ? " · <b>무장해제 중</b>" : "";
-    el.hint.innerHTML = `${rank} ${c.genome.name}${weakness}${disarmed} — <b>${binding("attack")}</b> 공격 · <b>${binding("parry")}</b> 패링${capturable}`;
+    el.hint.innerHTML = `${rank} ${c.genome.name}${weakness}${disarmed} — <b>${binding("attack")}</b> 공격 · <b>${binding("throw")}</b> 투척 · <b>${binding("parry")}</b> 패링${capturable}`;
     el.hint.hidden = false;
     return;
   }
@@ -2412,6 +2562,7 @@ function rewardNotice(text) {
 function clearPresentationEffects() {
   revealEffect = null;
   successEffects = [];
+  toolBreakEffects = [];
   craftingTimer = 0;
   craftingItem = null;
   celebrationTimer = 0;
@@ -2466,7 +2617,7 @@ function binding(action) {
 
 function updateControlLabels() {
   if (!el.paletteKey) return;
-  el.paletteKey.innerHTML = `<kbd>${binding("attack")}</kbd> 공격 · <kbd>${binding("parry")}</kbd> 패링 · <kbd>${binding("dodge")}</kbd> 전방 대시 · <kbd>${binding("lockOn")}</kbd> 조준 락온 · <kbd>${binding("capture")}</kbd> 포획 · <kbd>${binding("challenges")}</kbd> 도전 · <kbd>${binding("map")}</kbd> 지도`;
+  el.paletteKey.innerHTML = `<kbd>${binding("attack")}</kbd> 공격 · <kbd>${binding("throw")}</kbd> 투척 · <kbd>${binding("parry")}</kbd> 패링 · <kbd>${binding("dodge")}</kbd> 모멘텀 회피 · <kbd>${binding("lockOn")}</kbd> 조준 락온 · <kbd>${binding("capture")}</kbd> 포획`;
 }
 
 function settingsKeysHtml() {
@@ -2519,9 +2670,10 @@ function showTitle() {
         <button class="ghost" data-act="settings">환경설정</button>
       </div>
       <p class="keys">
-        <b>${binding("up")}${binding("left")}${binding("down")}${binding("right")}</b> 이동 · <b>${binding("sprint")}</b> 달리기 · <b>${binding("dodge")}</b> 회피 · <b>${binding("inventory")}</b> 장비 가방 · <b>${binding("challenges")}</b> 도전과제 · <b>${binding("map")}</b> 지도 · <b>${binding("attack")}</b> 방향 공격·사용 · <b>${binding("parry")}</b> 짧은 패링 · <b>${binding("capture")}</b> 포획·길들이기 · <b>${binding("dex")}</b> 크리처 도감<br>
+        <b>${binding("up")}${binding("left")}${binding("down")}${binding("right")}</b> 이동 · <b>${binding("sprint")}</b> 달리기 · <b>${binding("dodge")}</b> 회피 · <b>${binding("inventory")}</b> 장비 가방 · <b>${binding("attack")}</b> 방향 공격·사용 · <b>${binding("throw")}</b> 도구 투척 · <b>${binding("parry")}</b> 짧은 패링 · <b>${binding("capture")}</b> 포획·길들이기<br>
         해금 기술: <b>${binding("jump")}</b> 점프 · <b>${binding("wire")}</b> 와이어 · <b>${binding("reflector")}</b> 반사 방벽 · <b>${binding("lockOn")}</b> 조준 방향 고정<br>
-        회피: <b>${binding("dodge")}</b> 바라보는 방향으로 대시 · 락온 중에도 이동은 자유<br>
+        회피: <b>${binding("dodge")}</b> 최근 이동 모멘텀으로 짧게 대시 · 락온 중 대상에게 가까워지는 방향은 차단 · 신발에 따라 거리 변화<br>
+        투척: 장착 도구를 한 번 던지고 소모 · 락온 대상이 있으면 그 방향, 없으면 바라보는 방향<br>
         손도구: 파쇄력·사거리·부력·포획력 · 신발: 달리기·안정성·내구도
       </p>
     </div>`;
@@ -2640,7 +2792,9 @@ function gearStatText(item) {
     const s = item.petStats ?? petToolStats(item.rawStats ?? item.stats);
     return `공격 ${Math.round(s.power * 100)} · 지원거리 ${Math.round(s.range * 100)} · 생존 ${Math.round(s.guard * 100)} · 제압 ${Math.round(s.control * 100)} · ${budgetText}`;
   }
-  return `${item.toolType?.label ?? "손도구"} · 파쇄 ${Math.round(item.stats.edge * 100)} · 사거리 ${Math.round(item.stats.reach * 100)} · 부력 ${Math.round(item.stats.buoy * 100)} · 포획 ${Math.round(item.stats.grip * 100)} · 충격 ${Math.round((item.stats.impact ?? 0) * 100)} · 방어 ${Math.round((item.stats.guard ?? 0) * 100)} · ${budgetText}`;
+  const thrown = item.throwProfile ?? toolThrowProfile(item.rawStats ?? item.stats, item.stats);
+  const weight = thrown.weight < .4 ? "가벼움" : thrown.weight < .7 ? "보통" : "무거움";
+  return `${item.toolType?.label ?? "손도구"} · 파쇄 ${Math.round(item.stats.edge * 100)} · 사거리 ${Math.round(item.stats.reach * 100)} · 부력 ${Math.round(item.stats.buoy * 100)} · 포획 ${Math.round(item.stats.grip * 100)} · 충격 ${Math.round((item.stats.impact ?? 0) * 100)} · 방어 ${Math.round((item.stats.guard ?? 0) * 100)} · 투척 ${weight}/위력 ${thrown.damage}/거리 ${Math.round(thrown.range)} · ${budgetText}`;
 }
 
 function gearCards(slot) {
@@ -3023,6 +3177,7 @@ window.addEventListener("keydown", e => {
 
   if (action === "draw") openDraw("hand");
   else if (action === "attack") useTool();
+  else if (action === "throw") tryThrowTool();
   else if (action === "parry") tryParry();
   else if (action === "capture") captureNearbyCreature();
   else if (action === "dex") showDex();
@@ -3063,16 +3218,32 @@ function movePlayer(dt) {
     game.running = false;
     return;
   }
+  let inputX = 0;
+  let inputY = 0;
+  for (const code of keys) {
+    const v = moveVectorForCode(code);
+    if (v) { inputX += v[0]; inputY += v[1]; }
+  }
+  const inputLength = Math.hypot(inputX, inputY);
+  if (inputLength > 0 && game.dodgeTimer <= 0) {
+    const desiredX = inputX / inputLength;
+    const desiredY = inputY / inputLength;
+    const stability = game.shoes?.shoeStats?.stability ?? 0;
+    const response = Math.min(1, dt * (8.5 + stability * 4));
+    game.moveMomentumX += (desiredX - game.moveMomentumX) * response;
+    game.moveMomentumY += (desiredY - game.moveMomentumY) * response;
+    const momentumLength = Math.hypot(game.moveMomentumX, game.moveMomentumY) || 1;
+    game.moveMomentumX /= momentumLength;
+    game.moveMomentumY /= momentumLength;
+  }
   let dx = 0;
   let dy = 0;
   if (game.dodgeTimer > 0) {
     dx = game.dodgeX;
     dy = game.dodgeY;
   } else {
-    for (const code of keys) {
-      const v = moveVectorForCode(code);
-      if (v) { dx += v[0]; dy += v[1]; }
-    }
+    dx = inputX;
+    dy = inputY;
   }
 
   game.walking = dx !== 0 || dy !== 0;
@@ -3091,7 +3262,7 @@ function movePlayer(dt) {
   const moveMultiplier = game.running
     ? 1.42 + (shoe?.speed ?? 0) * 0.42 + frontierBoost
     : 1 + (shoe?.stability ?? 0) * 0.08;
-  const dodgeBoost = game.dodgeTimer > 0 ? dodgeTiming().speed : 1;
+  const dodgeBoost = game.dodgeTimer > 0 ? dodgeTiming(shoe).speed : 1;
   const step = PLAYER_SPEED * moveMultiplier * dodgeBoost * thermal.speed * dt;
   const beforeX = game.px;
   const beforeY = game.py;
@@ -3128,10 +3299,66 @@ function drawProjectiles(camX, camY) {
   for (const projectile of projectiles) {
     const sx = Math.round(projectile.x - camX);
     const sy = Math.round(projectile.y - camY);
+    if (projectile.kind === "tool") {
+      ctx.save();
+      ctx.strokeStyle = "rgba(255,241,199,.72)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash?.([3, 2]);
+      ctx.beginPath();
+      ctx.moveTo(Math.round(game.px - camX), Math.round(game.py - camY - 3));
+      ctx.lineTo(sx, sy);
+      ctx.stroke();
+      ctx.setLineDash?.([]);
+      ctx.translate(sx, sy);
+      ctx.rotate(game.time * .018);
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      for (const stroke of projectile.tool.strokes) {
+        if (stroke.length < 2) continue;
+        ctx.beginPath();
+        ctx.moveTo(stroke[0].x, stroke[0].y);
+        for (let i = 1; i < stroke.length; i++) ctx.lineTo(stroke[i].x, stroke[i].y);
+        ctx.strokeStyle = "#172033";
+        ctx.lineWidth = 3.5;
+        ctx.stroke();
+        ctx.strokeStyle = projectile.tool.color;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+      ctx.restore();
+      continue;
+    }
     ctx.fillStyle = projectile.reflected ? "#b7e8ff" : "#ff866f";
     ctx.fillRect(sx - 2, sy - 2, 5, 5);
     ctx.fillStyle = "#fff1c7";
     ctx.fillRect(sx, sy - 1, 2, 2);
+  }
+}
+
+function drawToolBreakEffects(camX, camY) {
+  for (const effect of toolBreakEffects) {
+    const elapsed = effect.duration - effect.time;
+    const fade = clamp(effect.time / effect.duration, 0, 1);
+    ctx.save();
+    ctx.globalAlpha = fade;
+    for (const fragment of effect.fragments) {
+      const x = Math.round(effect.x - camX + fragment.vx * elapsed);
+      const y = Math.round(effect.y - camY + fragment.vy * elapsed + 48 * elapsed * elapsed);
+      ctx.fillStyle = fragment.dark ? "#172033" : effect.color;
+      ctx.fillRect(x - 1, y - 1, fragment.size, fragment.size);
+      if (!fragment.dark && fragment.size > 2) {
+        ctx.fillStyle = "#fff1c7";
+        ctx.fillRect(x, y - 1, 1, 1);
+      }
+    }
+    if (elapsed < .13) {
+      ctx.strokeStyle = `rgba(255,241,199,${(1 - elapsed / .13).toFixed(3)})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(Math.round(effect.x - camX), Math.round(effect.y - camY), 4 + elapsed * 34, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 }
 
@@ -3188,6 +3415,7 @@ function render() {
   drawDroppedItems(camX, camY);
   drawDeathDrops(ctx, deathDrops, camX, camY, visualTime);
   drawProjectiles(camX, camY);
+  drawToolBreakEffects(camX, camY);
   drawWire(camX, camY);
 
   for (const m of game.marks) {
@@ -3229,7 +3457,7 @@ function render() {
       const craftingProgress = mode === "crafting" ? clamp(1 - craftingTimer / CRAFTING_DURATION, 0, 1) : 0;
       drawPlayer(ctx, sx, sy, game.faceX, game.faceY, game.walking, visualTime, game.jumpTimer <= 0 && isAfloat(), game.running, game.shoes, game.hurt, deathProgress, game.bindTimer, game.dodgeTimer, craftingProgress);
       if (mode === "crafting") drawCraftingReveal(ctx, craftingItem, sx, sy, craftingProgress);
-      else drawHeldTool(ctx, game.tool, sx, sy, game.faceX, game.faceY, game.swing);
+      else if (!projectiles.some(projectile => projectile.kind === "tool")) drawHeldTool(ctx, game.tool, sx, sy, game.faceX, game.faceY, game.swing);
       drawParryEffect(ctx, sx, sy, game.faceX, game.faceY, game.parryTimer, game.parryCooldown, game.parryFlash);
       drawReflectorWard(sx, sy);
     }
@@ -3284,6 +3512,7 @@ function frame(now) {
     game.dodgeTimer = Math.max(0, game.dodgeTimer - dt);
     game.dodgeCooldown = Math.max(0, game.dodgeCooldown - dt);
     game.dodgeLinkTimer = Math.max(0, game.dodgeLinkTimer - dt);
+    game.throwCooldown = Math.max(0, game.throwCooldown - dt);
     game.bindTimer = Math.max(0, game.bindTimer - dt);
     game.screenShake = Math.max(0, game.screenShake - dt * 2.8);
     game.jumpTimer = Math.max(0, game.jumpTimer - dt);
@@ -3295,6 +3524,7 @@ function frame(now) {
       if (revealEffect.time <= 0) revealEffect = null;
     }
     smokeEffects = smokeEffects.filter(effect => (effect.time -= dt) > 0);
+    toolBreakEffects = toolBreakEffects.filter(effect => (effect.time -= dt) > 0);
     updateHint();
     updateHud();
     mapTimer -= dt;

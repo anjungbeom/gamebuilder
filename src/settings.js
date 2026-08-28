@@ -6,6 +6,7 @@ export const KEY_ACTIONS = [
   { id: "sprint", label: "달리기", code: "ShiftLeft" },
   { id: "draw", label: "도구 그리기", code: "KeyQ" },
   { id: "attack", label: "공격·사용", code: "Space" },
+  { id: "throw", label: "일회성 도구 투척", code: "KeyT" },
   { id: "parry", label: "패링", code: "KeyP" },
   { id: "dodge", label: "회피", code: "Slash" },
   { id: "capture", label: "포획·길들이기", code: "KeyF" },
